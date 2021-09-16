@@ -181,7 +181,7 @@ function UploadFileToAzureStorage($sasUri, $bytes) {
     FinalizeAzureStorageUpload -sasUri $sasUri -ids $ids
 }
 
-function script:ValidateMobileAppWithFile($file, $mobileApp) {
+function ValidateMobileAppWithFile($file, $mobileApp) {
     # Get the mobileApp's OData type name
     $mobileAppTypeName = $mobileApp.'@odata.type'
     if (-not $mobileAppTypeName) {
@@ -217,13 +217,13 @@ function script:ValidateMobileAppWithFile($file, $mobileApp) {
     }
 }
 
-###################################################################################################
-
-function New-LobApp {
+function Set-LobApp {
     [CmdletBinding()]
     param(
-        [ValidateNotNullOrEmpty()][string]$filePath,
-        [ValidateNotNull()][PSObject]$mobileApp
+        
+        [Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][string]$filePath,
+        [Parameter(Mandatory=$true)][ValidateNotNull()][PSObject]$mobileApp
+        #[Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][switch]$existingApp
     )
 
     try {
@@ -242,7 +242,9 @@ function New-LobApp {
         ValidateMobileAppWithFile -file $sourceFile -mobileApp $mobileApp
 
         # Post the app metadata to Intune
-        $createdApp = $mobileApp | New-IntuneMobileApp
+        if (!($existingApp)) {
+            $createdApp = $mobileApp | New-IntuneMobileApp
+        }
 
         # Create a new content version for this app
         Write-Host "Creating Content Version in Intune for the application..." -ForegroundColor Yellow
@@ -286,7 +288,6 @@ function New-LobApp {
         throw
     }
 }
-
 #endregion Functions
 
 #region Azure authentication and file download
@@ -294,62 +295,89 @@ function New-LobApp {
 Disable-AzContextAutosave -Scope Process | Out-Null
 
 # Connect to Azure with Run As account/service principal created for the automation account
-$ServicePrincipalConnection = Get-AutomationConnection -Name 'AzureRunAsConnection' -ErrorAction Stop
-Connect-AzAccount -ServicePrincipal -Tenant $ServicePrincipalConnection.TenantId -ApplicationId $ServicePrincipalConnection.ApplicationId -CertificateThumbprint $ServicePrincipalConnection.CertificateThumbprint | Out-Null
-Set-AzContext -SubscriptionId $ServicePrincipalConnection.SubscriptionID -OutVariable AzureContext | Out-Null
+###$ServicePrincipalConnection = Get-AutomationConnection -Name 'AzureRunAsConnection' -ErrorAction Stop
+###Connect-AzAccount -ServicePrincipal -Tenant $ServicePrincipalConnection.TenantId -ApplicationId $ServicePrincipalConnection.ApplicationId -CertificateThumbprint $ServicePrincipalConnection.CertificateThumbprint | Out-Null
+###Set-AzContext -SubscriptionId $ServicePrincipalConnection.SubscriptionID -OutVariable AzureContext | Out-Null
+
+# Import the necessary modules
+@("Az.Storage", "Az.Accounts", "Microsoft.Graph.Intune") | ForEach-Object { Import-Module $PSItem }
 
 # Hydrate the variables
 $applicationName = "AnthemPulseV30"
-$cloudBlobContainer = "blobanthempulsev30"
+###$cloudBlobContainer = "blobanthempulsev30"
 ###$applicationName = Get-AutomationVariable -Name "ApplicationName"
 ###$cloudBlobContainer = Get-AutomationVariable -Name "cloudBlobContainer"
 
 # Get the files from the storage account
-$storageContext = $(Get-AzStorageAccount -ResourceGroupName $("rg", $(Get-AutomationVariable -Name "ApplicationName") -join $null) -Name $("sa", $(Get-AutomationVariable -Name "ApplicationName").ToLower() -join $null)).Context
-Get-AzStorageBlobContent -Context $storageContext -Blob "$ApplicationName.ipa" -Container $cloudBlobContainer -Destination "$pwd\$ApplicationName.ipa" | Out-Null
-Get-AzStorageBlobContent -Context $storageContext -Blob "$ApplicationName.ipa.ps1" -Container $cloudBlobContainer -Destination "$pwd\$ApplicationName.ipa.ps1" | Out-Null
+###$storageContext = $(Get-AzStorageAccount -ResourceGroupName $("rg", $(Get-AutomationVariable -Name "ApplicationName") -join $null) -Name $("sa", $(Get-AutomationVariable -Name "ApplicationName").ToLower() -join $null)).Context
+###Get-AzStorageBlobContent -Context $storageContext -Blob "$ApplicationName.ipa" -Container $cloudBlobContainer -Destination "$pwd\$ApplicationName.ipa" | Out-Null
+###Get-AzStorageBlobContent -Context $storageContext -Blob "$ApplicationName.ipa.ps1" -Container $cloudBlobContainer -Destination "$pwd\$ApplicationName.ipa.ps1" | Out-Null
 
 # Verify the download worked, and exit if it did not
 if ((Test-Path "$PWD\$applicationName.ipa") -and (Test-Path "$PWD\$applicationName.ipa.ps1")) {
     Write-Output "Files acquired"
-    Remove-AzStorageBlob -Context $storageContext -Blob "$ApplicationName.ipa" -Container $CloudBlobContainer
-    Remove-AzStorageBlob -Context $storageContext -Blob "$ApplicationName.ipa.ps1" -Container $CloudBlobContainer
+    #Remove-AzStorageBlob -Context $storageContext -Blob "$ApplicationName.ipa" -Container $CloudBlobContainer
+    #Remove-AzStorageBlob -Context $storageContext -Blob "$ApplicationName.ipa.ps1" -Container $CloudBlobContainer
 }
-else {"Unable to get files from Azure storage"; exit}
+else { "Unable to get files from Azure storage"; exit }
 Disconnect-AzAccount
 #endregion Azure authentication and file download
 
-
-Import-Module Microsoft.Graph.Intune
+#region Intune Graph application creation or update
 # AppID is the ApplicationId of the Service Principal created in AzureAD for this application
 # The AuthUrl ends with the TenantID of the authenticating tenant
 # The ClientSecret is an application level password specifically created for the service principal tied to the automation account
-Update-MsGraphEnvironment -AppId "191bdd6b-3e9a-440f-92a1-af06b3e73b55" -AuthUrl "https://login.microsoftonline.com/40116f04-90e9-4f3d-a895-152754654561" | Out-Null
+Update-MsGraphEnvironment -AppId "191bdd6b-3e9a-440f-92a1-af06b3e73b55" -AuthUrl "https://login.microsoftonline.com/40116f04-90e9-4f3d-a895-152754654561" -Quiet
 Connect-MsGraph -ClientSecret "1x3p8g5u2q1o4i4k2t2d6b2n" -Quiet
 
 ###Update-MsGraphEnvironment -AppId $ServicePrincipalConnection.ApplicationId -AuthUrl $("https://login.microsoftonline.com", $ServicePrincipalConnection.TenantId -join "/") -Quiet
 ###Connect-MSGraph -ClientSecret $(Get-AutomationVariable -Name "ClientSecret") -Quiet
 
+# Import the variables for building the package
 $appPropertiesFile = Join-Path -Path $PWD -ChildPath "$applicationName.ipa.ps1"
-
 $appProperties = . $appPropertiesFile
-# Create the object that contains information about the app
-$appToUpload = New-MobileAppObject `
-    -iosLobApp `
-    -applicableDeviceType (New-IosDeviceTypeObject -iPad $true -iPhoneAndIPod $true) `
-    -minimumSupportedOperatingSystem (New-IosMinimumOperatingSystemObject -v12_0 $true) `
-    -displayName $appProperties.displayName `
-    -description $appProperties.description `
-    -publisher $appProperties.publisher `
-    -bundleId $appProperties.bundleId `
-    -fileName $appProperties.sourceFile `
-    -buildNumber $appProperties.versionNumber `
-    -versionNumber $appProperties.versionNumber `
-    -expirationDateTime $appProperties.expirationDateTime
 
+$existingApp = Get-IntuneMobileApp -Filter "displayName eq `'$($appProperties.displayName)`'"
+
+# Check for existing applications with the same displayName (as it's the only indexable value provided)
+if ($null -ne $existingApp) {
+    Write-Warning "This application $($appProperties.displayName) already exists; this will be considered an update and will overwrite the already existing application"
+    # Acquire information about the existing object that contains information about the app
+    Update-IntuneMobileApp `
+        -iosLobApp `
+        -mobileAppId $existingApp.id `
+        -applicableDeviceType (New-IosDeviceTypeObject -iPad $true -iPhoneAndIPod $true) `
+        -minimumSupportedOperatingSystem (New-IosMinimumOperatingSystemObject -v12_0 $true) `
+        -displayName $appProperties.displayName `
+        -description $appProperties.description `
+        -publisher $appProperties.publisher `
+        -bundleId $appProperties.bundleId `
+        -fileName $appProperties.sourceFile `
+        -buildNumber $appProperties.versionNumber `
+        -versionNumber $appProperties.versionNumber `
+        -expirationDateTime $appProperties.expirationDateTime
+    $appToUpload = Get-IntuneMobileApp -Filter "displayName eq `'$($appProperties.displayName)`'"
+}
+else {
+    # Create the object that contains information about the app
+    $appToUpload = New-MobileAppObject `
+        -iosLobApp `
+        -applicableDeviceType (New-IosDeviceTypeObject -iPad $true -iPhoneAndIPod $true) `
+        -minimumSupportedOperatingSystem (New-IosMinimumOperatingSystemObject -v12_0 $true) `
+        -displayName $appProperties.displayName `
+        -description $appProperties.description `
+        -publisher $appProperties.publisher `
+        -bundleId $appProperties.bundleId `
+        -fileName $appProperties.sourceFile `
+        -buildNumber $appProperties.versionNumber `
+        -versionNumber $appProperties.versionNumber `
+        -expirationDateTime $appProperties.expirationDateTime
+}
 # Upload the app file with the app information
-$filePath = Join-Path -Path $PSScriptRoot -ChildPath $appProperties.sourceFile
-$createdApp = New-LobApp -filePath $filePath -mobileApp $appToUpload
+$filePath = Join-Path -Path $PWD -ChildPath $appProperties.sourceFile
+$createdApp = Set-LobApp -filePath $filePath -mobileApp $appToUpload
 
 # Write the output for the job
 Write-Output $createdApp
+
+#endregion Intune Graph application creation or update
