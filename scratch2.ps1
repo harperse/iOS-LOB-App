@@ -95,7 +95,7 @@ $Error.Clear()
 
 . .\AnthemPulseV30.ipa.ps1
 
-$applicationIdGuid = New-Guid
+#$applicationIdGuid = New-Guid
 
 $appBody = [ordered]@{ 
     "@odata.type"                     = "#microsoft.graph.iosLOBApp" 
