@@ -356,11 +356,10 @@ if ($null -ne $existingApp) {
         -buildNumber $appProperties.versionNumber `
         -versionNumber $appProperties.versionNumber `
         -expirationDateTime $appProperties.expirationDateTime
-    $appToUpload = Get-IntuneMobileApp -Filter "displayName eq `'$($appProperties.displayName)`'"
 }
 else {
     # Create the object that contains information about the app
-    $appToUpload = New-MobileAppObject `
+    New-MobileAppObject `
         -iosLobApp `
         -applicableDeviceType (New-IosDeviceTypeObject -iPad $true -iPhoneAndIPod $true) `
         -minimumSupportedOperatingSystem (New-IosMinimumOperatingSystemObject -v12_0 $true) `
@@ -374,6 +373,7 @@ else {
         -expirationDateTime $appProperties.expirationDateTime
 }
 # Upload the app file with the app information
+$appToUpload = Get-IntuneMobileApp -Filter "displayName eq `'$($appProperties.displayName)`'"
 $filePath = Join-Path -Path $PWD -ChildPath $appProperties.sourceFile
 $createdApp = Set-LobApp -filePath $filePath -mobileApp $appToUpload
 
