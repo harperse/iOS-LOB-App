@@ -1,0 +1,18 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "storageAccounts_name": {
+            "value": "saIOSLOBAPPNAME"
+        },
+        "systemTopics_name": {
+            "value": "bmIOSLOBAPPNAME"
+        },
+        "automationAccounts_name": {
+            "value": "aaIOSLOBAPPNAME"
+        },
+        "blobContainer_Name": {
+            "value": "blobIOSLOBAPPNAME"
+        }
+    }
+}

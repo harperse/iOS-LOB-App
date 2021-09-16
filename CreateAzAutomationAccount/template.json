@@ -1,0 +1,135 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "storageAccounts_name": {
+            "defaultValue": "saIOSLOBAPPNAME",
+            "type": "String"
+        },
+        "systemTopics_name": {
+            "defaultValue": "bmIOSLOBAPPNAME",
+            "type": "String"
+        },
+        "automationAccounts_name": {
+            "defaultValue": "aaIOSLOBAPPNAME",
+            "type": "String"
+        },
+        "blobContainer_Name": {
+            "defaultValue": "blobIOSLOBAPPNAME",
+            "type": "string"
+        }
+    },
+    "variables": {},
+    "resources": [
+        {
+            "type": "Microsoft.Automation/automationAccounts",
+            "apiVersion": "2020-01-13-preview",
+            "name": "[parameters('automationAccounts_name')]",
+            "location": "eastus",
+            "properties": {
+                "sku": {
+                    "name": "Basic"
+                },
+                "encryption": {
+                    "keySource": "Microsoft.Automation",
+                    "identity": {}
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2021-04-01",
+            "name": "[parameters('storageAccounts_name')]",
+            "location": "eastus",
+            "sku": {
+                "name": "Premium_LRS",
+                "tier": "Premium"
+            },
+            "kind": "BlockBlobStorage",
+            "properties": {
+                "allowCrossTenantReplication": true,
+                "minimumTlsVersion": "TLS1_2",
+                "allowBlobPublicAccess": false,
+                "allowSharedKeyAccess": true,
+                "networkAcls": {
+                    "bypass": "AzureServices",
+                    "virtualNetworkRules": [],
+                    "ipRules": [],
+                    "defaultAction": "Allow"
+                },
+                "supportsHttpsTrafficOnly": true,
+                "encryption": {
+                    "requireInfrastructureEncryption": true,
+                    "services": {
+                        "file": {
+                            "keyType": "Account",
+                            "enabled": true
+                        },
+                        "blob": {
+                            "keyType": "Account",
+                            "enabled": true
+                        }
+                    },
+                    "keySource": "Microsoft.Storage"
+                },
+                "accessTier": "Hot"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices",
+            "apiVersion": "2021-04-01",
+            "name": "[concat(parameters('storageAccounts_name'), '/default')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccounts_name'))]"
+            ],
+            "sku": {
+                "name": "Premium_LRS",
+                "tier": "Premium"
+            },
+            "properties": {
+                "changeFeed": {
+                    "enabled": false
+                },
+                "containerDeleteRetentionPolicy": {
+                    "enabled": true,
+                    "days": 7
+                },
+                "cors": {
+                    "corsRules": []
+                },
+                "deleteRetentionPolicy": {
+                    "enabled": true,
+                    "days": 7
+                },
+                "isVersioningEnabled": false
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2021-04-01",
+            "name": "[concat(parameters('storageAccounts_name'), '/default/', parameters('blobContainer_Name'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storageAccounts_name'), 'default')]",
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccounts_name'))]"
+            ],
+            "properties": {
+                "defaultEncryptionScope": "$account-encryption-key",
+                "denyEncryptionScopeOverride": false,
+                "publicAccess": "None"
+            }
+        },
+        {
+            "type": "Microsoft.EventGrid/systemTopics",
+            "apiVersion": "2021-06-01-preview",
+            "name": "[parameters('systemTopics_name')]",
+            "location": "eastus",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccounts_name'))]"
+            ],
+            "properties": {
+                "source": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccounts_name'))]",
+                "topicType": "Microsoft.Storage.StorageAccounts"
+            }
+        }
+    ]
+}
