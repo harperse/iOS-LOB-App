@@ -320,7 +320,7 @@ if ((Test-Path "$PWD\$applicationName.ipa") -and (Test-Path "$PWD\$applicationNa
     #Remove-AzStorageBlob -Context $storageContext -Blob "$ApplicationName.ipa.ps1" -Container $CloudBlobContainer
 }
 else { "Unable to get files from Azure storage"; exit }
-Disconnect-AzAccount
+###Disconnect-AzAccount
 #endregion Azure authentication and file download
 
 #region Intune Graph application creation or update
@@ -337,9 +337,10 @@ Connect-MsGraph -ClientSecret "1x3p8g5u2q1o4i4k2t2d6b2n" -Quiet
 $appPropertiesFile = Join-Path -Path $PWD -ChildPath "$applicationName.ipa.ps1"
 $appProperties = . $appPropertiesFile
 
-$existingApp = Get-IntuneMobileApp -Filter "displayName eq `'$($appProperties.displayName)`'"
-
 # Check for existing applications with the same displayName (as it's the only indexable value provided)
+$existingApp = Get-IntuneMobileApp -Filter "displayName eq `'$($appProperties.displayName)`'" -ErrorAction SilentlyContinue
+
+# If the application exists, update the application properties (whether necessary or not) 
 if ($null -ne $existingApp) {
     Write-Warning "This application $($appProperties.displayName) already exists; this will be considered an update and will overwrite the already existing application"
     # Acquire information about the existing object that contains information about the app
