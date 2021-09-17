@@ -50,6 +50,7 @@ function CreateServicePrincipal {
     }
     else {
         $Application = New-AzADApplication -DisplayName $aaAccountName -HomePage ("http://" + $aaAccountName) -IdentifierUris ("http://" + $keyId) -Verbose -Password $ClientSecret
+        
     }
     
 
@@ -59,6 +60,7 @@ function CreateServicePrincipal {
     }
     else {
         New-AzADAppCredential -ApplicationId $Application.ApplicationId -CertValue $keyValue -StartDate $PfxCert.NotBefore -EndDate $PfxCert.NotAfter -Verbose
+
     }
 
     # Requires Application administrator or GLOBAL ADMIN
@@ -73,6 +75,14 @@ function CreateServicePrincipal {
         }
         Default { New-AzADServicePrincipal -ApplicationId $Application.ApplicationId -OutVariable ServicePrincipal -Verbose }
     }
+
+    # Grant the DeviceManagementApps.ReadWrite.All role to the service principal
+    #*#*#* WIP #*#*#*
+    $deviceManagementAppsRole = New-Object "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList @("78145de6-330d-4800-a6ce-494ff2d33d07", "Role")
+    $requiredResourceAccess = New-Object "Microsoft.Open.AzureAD.Model.RequiredResourceAccess"
+    $requiredResourceAccess.ResourceAppId = $(Get-AzADServicePrincipal -ApplicationId $Application.ApplicationId).ApplicationId
+    $requiredResourceAccess.ResourceAccess = $(New-Object "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList @("78145de6-330d-4800-a6ce-494ff2d33d07", "Role"))
+    Set-AzureADApplication -ObjectId $Application.ObjectId -RequiredResourceAccess $requiredResourceAccess
 
     # Sleep here for a few seconds to allow the service principal application to become active (ordinarily takes a few seconds)
     Start-Sleep -Seconds 15
@@ -132,7 +142,7 @@ function New-AzAutomationRunAsAccount {
 . .\Globals.ps1 -ApplicationName $ApplicationName
 
 [string[]]$AzResourceProviders = @("Microsoft.EventGrid")
-[string[]]$ModulesList = @("Az.Accounts", "Az.Automation", "Az.Storage", "AzureAD")
+[string[]]$ModulesList = @("Az.Accounts", "Az.Automation", "Az.Storage", "AzureAD", "Microsoft.Graph.Intune")
 $certPWGlobal = Get-RandomPassword -AsSecureString
 $ClientSecret = Get-RandomPassword -AsSecureString
 
@@ -171,7 +181,7 @@ $storageAccountKeys = Get-AzStorageAccountKey -ResourceGroupName $resourceGroupN
 #endregion Prepare the storage account
 
 #region Prepare the automation account
-Import-AzAutomationRunbook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Path ".\runbook_raw.ps1" -Type PowerShell -Name $aaRunbookName -Description "Publishing pipeline" -Published
+Import-AzAutomationRunbook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Path ".\Publish-Lob.Runbook.ps1" -Type PowerShell -Name $aaRunbookName -Description "Publishing pipeline" -Published
 $aaRunbookWebhook = New-AzAutomationWebhook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $aaRunbookWebhookName -RunbookName $aaRunbookName -IsEnabled $true -ExpiryTime ([datetime]::Now).AddYears(3)
 <#$automationVariables = @{
     "StorageAccountKey1" = $storageAccountKeys[0].Value
@@ -200,7 +210,7 @@ New-AzEventGridSubscription -ResourceId $(Get-AzResource -ResourceGroupName $res
 
 #region Prepare the automation runbook
 # Uncomment when testing second app
-$aaModulesList = @("Az.Accounts", "AzureAD", "Microsoft.Graph.Authentication", "Az.Automation", "Az.Storage")
+$aaModulesList = @("Az.Accounts", "AzureAD", "Microsoft.Graph.Intune", "Az.Automation", "Az.Storage")
 $aaModulesRemoveList = @("Azure", "Azure.Storage", "AzureRM.Automation", "AzureRM.Compute", "AzureRM.Profile", "AzureRM.Resources", "AzureRM.SQL", "AzureRM.Storage")
 Write-Output "Updating Azure modules on Automation Account"
 Write-Warning "Allowing time for module import to process; please be patient"
