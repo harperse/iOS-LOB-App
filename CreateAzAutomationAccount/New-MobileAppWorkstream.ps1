@@ -1,4 +1,5 @@
 #Requires -RunAsAdministrator
+#Requires -Modules ("Az.Accounts", "Az.Automation", "Az.Storage", "AzureADPreview", "Microsoft.Graph.Intune")
 
 [CmdletBinding()]
 param (
