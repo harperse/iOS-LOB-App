@@ -78,11 +78,12 @@ function CreateServicePrincipal {
 
     # Grant the DeviceManagementApps.ReadWrite.All role to the service principal
     #*#*#* WIP #*#*#*
-    $deviceManagementAppsRole = New-Object "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList @("78145de6-330d-4800-a6ce-494ff2d33d07", "Role")
+    #$deviceManagementAppsRole = New-Object "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList @("78145de6-330d-4800-a6ce-494ff2d33d07", "Role")
     $requiredResourceAccess = New-Object "Microsoft.Open.AzureAD.Model.RequiredResourceAccess"
     $requiredResourceAccess.ResourceAppId = $(Get-AzADServicePrincipal -ApplicationId $Application.ApplicationId).ApplicationId
     $requiredResourceAccess.ResourceAccess = $(New-Object "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList @("78145de6-330d-4800-a6ce-494ff2d33d07", "Role"))
     Set-AzureADApplication -ObjectId $Application.ObjectId -RequiredResourceAccess $requiredResourceAccess
+    #Invoke-RestMethod -Uri "https://login.microsoftonline.com/$tenantID/adminconsent?client_id=$($Application.ObjectId)" -Method Get
 
     # Sleep here for a few seconds to allow the service principal application to become active (ordinarily takes a few seconds)
     Start-Sleep -Seconds 15
@@ -142,7 +143,7 @@ function New-AzAutomationRunAsAccount {
 . .\Globals.ps1 -ApplicationName $ApplicationName
 
 [string[]]$AzResourceProviders = @("Microsoft.EventGrid")
-[string[]]$ModulesList = @("Az.Accounts", "Az.Automation", "Az.Storage", "AzureAD", "Microsoft.Graph.Intune")
+[string[]]$ModulesList = @("Az.Accounts", "Az.Automation", "Az.Storage", "AzureADPreview", "Microsoft.Graph.Intune")
 $certPWGlobal = Get-RandomPassword -AsSecureString
 $ClientSecret = Get-RandomPassword -AsSecureString
 
