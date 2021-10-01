@@ -142,6 +142,7 @@ function New-AzAutomationRunAsAccount {
 
 #region Main body
 . .\Globals.ps1 -ApplicationName $ApplicationName
+Start-Transcript -Path ".\NewMobileAppWorkstream.$ApplicationName.log" -Verbose
 
 [string[]]$AzResourceProviders = @("Microsoft.EventGrid")
 [string[]]$ModulesList = @("Az.Accounts", "Az.Automation", "Az.Storage", "AzureADPreview", "Microsoft.Graph.Intune")
@@ -185,7 +186,7 @@ $storageAccountKeys = Get-AzStorageAccountKey -ResourceGroupName $resourceGroupN
 #region Prepare the automation account
 Import-AzAutomationRunbook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Path ".\Publish-Lob.Runbook.ps1" -Type PowerShell -Name $aaRunbookName -Description "Publishing pipeline" -Published
 $aaRunbookWebhook = New-AzAutomationWebhook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $aaRunbookWebhookName -RunbookName $aaRunbookName -IsEnabled $true -ExpiryTime ([datetime]::Now).AddYears(3)
-<#$automationVariables = @{
+$automationVariables = @{
     "StorageAccountKey1" = $storageAccountKeys[0].Value
     "StorageAccountKey2" = $storageAccountKeys[1].Value
     "ApplicationID"      = $ApplicationServicePrincipal
@@ -194,15 +195,16 @@ $aaRunbookWebhook = New-AzAutomationWebhook -ResourceGroupName $resourceGroupNam
     "ApplicationName"    = $ApplicationName
     "ClientSecret"       = $([System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ClientSecret)))
 }
-#>
 
-New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "StorageAccountKey1" -Value $storageAccountKeys[0].Value -Encrypted $false -Verbose
-New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "StorageAccountKey2" -Value $storageAccountKeys[1].Value -Encrypted $false -Verbose
-New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "ApplicationID" -Value $ApplicationServicePrincipal -Encrypted $false -Verbose
-New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "LOBType" -Value "microsoft.graph.iosLOBApp" -Encrypted $false -Verbose
-New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "CloudBlobContainer" -Value $storacctContainer.Name -Encrypted $false -Verbose
-New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "ApplicationName" -Value $ApplicationName -Encrypted $false -Verbose
-New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "ClientSecret" -Value $([System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ClientSecret))) -Encrypted $false -Verbose
+$automationVariables.GetEnumerator().ForEach({New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $PSItem.Key -Value $PSItem.Value -Encrypted $false -Verbose})
+
+#New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "StorageAccountKey1" -Value $storageAccountKeys[0].Value -Encrypted $false -Verbose
+#New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "StorageAccountKey2" -Value $storageAccountKeys[1].Value -Encrypted $false -Verbose
+#New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "ApplicationID" -Value $ApplicationServicePrincipal -Encrypted $false -Verbose
+#New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "LOBType" -Value "microsoft.graph.iosLOBApp" -Encrypted $false -Verbose
+#New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "CloudBlobContainer" -Value $storacctContainer.Name -Encrypted $false -Verbose
+#New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "ApplicationName" -Value $ApplicationName -Encrypted $false -Verbose
+#New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "ClientSecret" -Value $([System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ClientSecret))) -Encrypted $false -Verbose
 #endregion Prepare the automation account
 
 #region Prepare the event grid
@@ -220,6 +222,7 @@ $aaModulesList | ForEach-Object { Import-ModulesFromPSGalleryToModuleShare $PSIt
 $aaModulesRemoveList | ForEach-Object { Remove-AzAutomationModule -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $PSItem -Force -ErrorAction SilentlyContinue }
 #endregion Prepare the automation runbook
 
+Stop-Transcript -Verbose
 
 # force in RG deployment line, removing application line, webhook line
 # No -EndDate for application?
