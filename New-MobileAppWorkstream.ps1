@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-#Requires -Modules ("Az.Accounts", "Az.Automation", "Az.Storage", "AzureADPreview", "Microsoft.Graph.Intune")
+#Requires -Modules ("Az.Accounts", "Az.Automation", "Az.Storage", "AzureAD", "Microsoft.Graph.Intune")
 
 [CmdletBinding()]
 param (
@@ -67,7 +67,7 @@ function CreateServicePrincipal {
     # Requires Application administrator or GLOBAL ADMIN
     switch ((Get-AzADServicePrincipal -DisplayNameBeginsWith $aaAccountName -ErrorAction SilentlyContinue).Count) {
         { $PSItem -gt 0 } {
-            $existingAzADServicePrincipals = Get-AzADServicePrincipal -DisplayNameBeginsWith $aaAccountName
+            $existingAzADServicePrincipals = Get-AzADServicePrincipal -DisplayNameBeginsWith $aaAccountName -ErrorAction SilentlyContinue
             foreach ($existingAzADServicePrincipal in $existingAzADServicePrincipals) {
                 Write-Warning "You are about to delete an service principal which may be associated with one or more Azure resources"
                 Remove-AzADServicePrincipal -ObjectId $existingAzADServicePrincipal.ObjectId -Force -Confirm -Verbose
@@ -142,10 +142,14 @@ function New-AzAutomationRunAsAccount {
 
 #region Main body
 . .\Globals.ps1 -ApplicationName $ApplicationName
-Start-Transcript -Path ".\NewMobileAppWorkstream.$ApplicationName.log" -Verbose
+$transcriptPath = ".\NewMobileAppWorkstream.$ApplicationName.log"
+if (Test-Path $transcriptPath) {
+    Remove-Item $transcriptPath
+}
+Start-Transcript -Path $transcriptPath -Verbose
 
 [string[]]$AzResourceProviders = @("Microsoft.EventGrid")
-[string[]]$ModulesList = @("Az.Accounts", "Az.Automation", "Az.Storage", "AzureADPreview", "Microsoft.Graph.Intune")
+[string[]]$ModulesList = @("Az.Accounts", "Az.Automation", "Az.Storage", "AzureAD", "Microsoft.Graph.Intune")
 $certPWGlobal = Get-RandomPassword -AsSecureString
 $ClientSecret = Get-RandomPassword -AsSecureString
 
@@ -156,6 +160,7 @@ $ModulesList | ForEach-Object { Import-Module $PSItem }
 if (((Get-AzContext).Subscription.Id -ne $subscriptionID) -or (Get-AzContext).Tenant.Id -ne $tenantID) {
     Connect-AzAccount -Tenant $tenantName -SubscriptionId $subscriptionID -Verbose
 }
+Connect-AzureAD -AzureEnvironmentName $azureEnvironment -TenantId $tenantID
 
 # Prepare the Azure subscription
 foreach ($AzResourceProvider in $AzResourceProviders) {
@@ -167,6 +172,9 @@ foreach ($AzResourceProvider in $AzResourceProviders) {
 # Build the required resources using JSON template and parameters files 
 # Uncomment when testing second app
 (Get-Content .\parameters.json).Replace("IOSLOBAPPNAME", $ApplicationName.ToLower()) | Set-Content .\parameters.$ApplicationName.json -Force
+if ($null -ne $(Get-AzResourceGroup -Name $("rg", $ApplicationName -join $null) -Location $location -ErrorAction SilentlyContinue)) {
+    Write-Error "Duplicate Azure Resource Group detected.  Exiting script"; Exit
+}
 New-AzResourceGroup -Name $("rg", $ApplicationName -join $null) -Location $location
 New-AzResourceGroupDeployment -ResourceGroupName $("rg", $ApplicationName -join $null) -Mode Complete -Name "Deployment_$ApplicationName" -DeploymentDebugLogLevel All -TemplateFile .\template.json -TemplateParameterFile .\parameters.$ApplicationName.json
 #

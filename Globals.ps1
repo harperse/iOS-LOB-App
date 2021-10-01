@@ -13,6 +13,7 @@ New-Variable -Name "tenantID" -Value "40116f04-90e9-4f3d-a895-152754654561" -For
 New-Variable -Name "subscriptionName" -Value "ES-CE-CUS-EXT-seharper" -Force
 New-Variable -Name "subscriptionID" -Value "709272e4-8b76-40d9-9a8a-00731f51eb83" -Force
 New-Variable -Name "location" -Value "eastus" -Force
+New-Variable -Name "azureEnvironment" -Value "AzureCloud" -Force
 
 New-Variable -Name "resourceGroupName" -Value $("rg", $ApplicationName.ToLower() -join $null) -Force
 New-Variable -Name "storacctName" -Value $("sa", $ApplicationName.ToLower() -join $null) -Force
@@ -35,12 +36,6 @@ New-Variable -Name "CertificateName" -Value $($aaAccountName, $CertificateAssetN
 New-Variable -Name "PfxCertPathForRunAsAccount" -Value $(Join-Path $env:TEMP ($CertificateName + ".pfx")) -Force
 New-Variable -Name "CerCertPathForRunAsAccount" -Value $(Join-Path $env:TEMP ($CertificateName + ".cer")) -Force
 #endregion Create-AzAutomationAccount.ps1
-
-<#
-if (((Get-AzContext).Subscription.Id -ne $subscriptionID) -or (Get-AzContext).Tenant.Id -ne $tenantID) {
-    Connect-AzAccount -Tenant $tenantName -SubscriptionId $subscriptionID
-}
-#>
 
 #region Links
 # https://github.com/microsoftgraph/powershell-intune-samples/tree/master/LOB_Application
