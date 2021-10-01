@@ -17,14 +17,13 @@ New-Variable -Name "azureEnvironment" -Value "AzureCloud" -Force
 
 New-Variable -Name "resourceGroupName" -Value $("rg", $ApplicationName.ToLower() -join $null) -Force
 New-Variable -Name "storacctName" -Value $("sa", $ApplicationName.ToLower() -join $null) -Force
-New-Variable -Name "storacctBlobName" -Value $("blob", $ApplicationName.ToLower() -join $null) -Force
+# New-Variable -Name "storacctBlobName" -Value $("blob", $ApplicationName.ToLower() -join $null) -Force
 New-Variable -Name "aaAccountName" -Value $("aa", $ApplicationName.ToLower() -join $null) -Force
 New-Variable -Name "keyVaultName" -Value $("kv", $ApplicationName.ToLower() -join $null) -Force
 New-Variable -Name "eventGridTopicName" -Value $("bm", $ApplicationName.ToLower() -join $null) -Force
 New-Variable -Name "eventGridSubscriptionName" -Value $("es", $ApplicationName.ToLower() -join $null) -Force
 
 #region Create-AzAutomationAccount.ps1
-
 New-Variable -Name "aaRunbookName" -Value $("Publish", $ApplicationName.ToLower() -join "_") -Force
 New-Variable -Name "aaRunbookWebhookName" -Value "ExecutePipeline" -Force
 New-Variable -Name "CertificateAssetName" -Value  "AzureRunAsCertificate" -Force

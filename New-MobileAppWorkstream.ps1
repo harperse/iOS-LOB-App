@@ -60,8 +60,8 @@ function CreateServicePrincipal {
         Remove-AzADAppCredential -DisplayName $ApplicationName -Force -Verbose
     }
     else {
+        Write-Output "Creating application credential object"
         New-AzADAppCredential -ApplicationId $Application.ApplicationId -CertValue $keyValue -StartDate $PfxCert.NotBefore -EndDate $PfxCert.NotAfter -Verbose
-
     }
 
     # Requires Application administrator or GLOBAL ADMIN
@@ -72,9 +72,13 @@ function CreateServicePrincipal {
                 Write-Warning "You are about to delete an service principal which may be associated with one or more Azure resources"
                 Remove-AzADServicePrincipal -ObjectId $existingAzADServicePrincipal.ObjectId -Force -Confirm -Verbose
             }
-            New-AzADServicePrincipal -ApplicationId $Application.ApplicationId -OutVariable ServicePrincipal -Verbose
+            Write-Output "Creating service principal object"
+            New-AzADServicePrincipal -ApplicationId $Application.ApplicationId -OutVariable ServicePrincipal -StartDate $PfxCert.NotBefore -EndDate $PfxCert.NotAfter -Verbose
         }
-        Default { New-AzADServicePrincipal -ApplicationId $Application.ApplicationId -OutVariable ServicePrincipal -Verbose }
+        Default { 
+            Write-Output "Creating service principal object"
+            New-AzADServicePrincipal -ApplicationId $Application.ApplicationId -OutVariable ServicePrincipal -StartDate $PfxCert.NotBefore -EndDate $PfxCert.NotAfter -Verbose 
+        }
     }
 
     # Grant the DeviceManagementApps.ReadWrite.All role to the service principal
@@ -87,10 +91,11 @@ function CreateServicePrincipal {
     #Invoke-RestMethod -Uri "https://login.microsoftonline.com/$tenantID/adminconsent?client_id=$($Application.ObjectId)" -Method Get
 
     # Sleep here for a few seconds to allow the service principal application to become active (ordinarily takes a few seconds)
+    Write-Output "Pausing to allow the service principal application to become active"
     Start-Sleep -Seconds 15
 
     # Requires User Access Administrator or Owner.
-    #$NewRole = New-AzRoleAssignment -RoleDefinitionName Contributor -ServicePrincipalName $Application.ApplicationId -ErrorAction SilentlyContinue -Verbose
+    $NewRole = New-AzRoleAssignment -RoleDefinitionName Contributor -ServicePrincipalName $Application.ApplicationId -ErrorAction SilentlyContinue -Verbose
     $Retries = 0
     while ($null -eq $NewRole -and $Retries -le 6) {
         Start-Sleep -Seconds 15
@@ -123,18 +128,22 @@ function New-AzAutomationRunAsAccount {
     }   
 
     # Create the Automation certificate asset
+    Write-Output "Removing default automation certificate"
     Remove-AzAutomationCertificate -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $CertificateAssetName -ErrorAction SilentlyContinue -Verbose
+    Write-Output "Creating correct automation certificate"
     New-AzAutomationCertificate -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Path $PfxCertPathForRunAsAccount -Name $CertificateAssetName -Password $certPWGlobal -Exportable -Verbose
 
     # Populate the ConnectionFieldValues
     $ConnectionFieldValues = @{"ApplicationId" = $ApplicationId.ApplicationId; "TenantId" = $tenantID; "CertificateThumbprint" = $PfxCert.Thumbprint; "SubscriptionId" = $subscriptionID }
 
     # Create an Automation connection asset named AzureRunAsConnection in the Automation account. This connection uses the service principal.
+    Write-Output "Removing default automation connection"
     Remove-AzAutomationConnection -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $connectionAssetName -Force -ErrorAction SilentlyContinue -Verbose
+    Write-Output "Creating correct automation connection using service principal"
     New-AzAutomationConnection -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $connectionAssetName -ConnectionTypeName $connectionTypeName -ConnectionFieldValues $connectionFieldValues
 
-    #Remove-Item $PfxCertPathForRunAsAccount
-    #Remove-Item $CerCertPathForRunAsAccount
+    Remove-Item $PfxCertPathForRunAsAccount
+    Remove-Item $CerCertPathForRunAsAccount
 
     return $ApplicationId
 }
@@ -160,7 +169,7 @@ $ModulesList | ForEach-Object { Import-Module $PSItem }
 if (((Get-AzContext).Subscription.Id -ne $subscriptionID) -or (Get-AzContext).Tenant.Id -ne $tenantID) {
     Connect-AzAccount -Tenant $tenantName -SubscriptionId $subscriptionID -Verbose
 }
-Connect-AzureAD -AzureEnvironmentName $azureEnvironment -TenantId $tenantIDy
+Connect-AzureAD -AzureEnvironmentName $azureEnvironment -TenantId $tenantID
 
 # Prepare the Azure subscription
 foreach ($AzResourceProvider in $AzResourceProviders) {
@@ -197,14 +206,14 @@ $aaRunbookWebhook = New-AzAutomationWebhook -ResourceGroupName $resourceGroupNam
 $automationVariables = @{
     "StorageAccountKey1" = $storageAccountKeys[0].Value
     "StorageAccountKey2" = $storageAccountKeys[1].Value
-    "ApplicationID"      = $ApplicationServicePrincipal
+    #"ApplicationID"      = $ApplicationServicePrincipal
     "LOBType"            = "microsoft.graph.iosLOBApp"
-    "CloudBlobContainer" = $storacctContainer.Name
+    "CloudBlobContainer" = $("blob", $ApplicationName.ToLower() -join $null)
     "ApplicationName"    = $ApplicationName
     "ClientSecret"       = $([System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ClientSecret)))
 }
 
-$automationVariables.GetEnumerator().ForEach({New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $PSItem.Key -Value $PSItem.Value -Encrypted $false -Verbose})
+$automationVariables.GetEnumerator().ForEach({ New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $PSItem.Key -Value $PSItem.Value -Encrypted $false -Verbose })
 
 #New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "StorageAccountKey1" -Value $storageAccountKeys[0].Value -Encrypted $false -Verbose
 #New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name "StorageAccountKey2" -Value $storageAccountKeys[1].Value -Encrypted $false -Verbose
