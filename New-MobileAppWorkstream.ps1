@@ -67,7 +67,7 @@ function CreateServicePrincipal {
     # Requires Application administrator or GLOBAL ADMIN
     switch ((Get-AzADServicePrincipal -DisplayNameBeginsWith $aaAccountName -ErrorAction SilentlyContinue).Count) {
         { $PSItem -gt 0 } {
-            $existingAzADServicePrincipals = Get-AzADServicePrincipal -DisplayNameBeginsWith $aaAccountName -ErrorAction SilentlyContinue
+            $existingAzADServicePrincipals = Get-AzADServicePrincipal -DisplayName $aaAccountName -ErrorAction SilentlyContinue
             foreach ($existingAzADServicePrincipal in $existingAzADServicePrincipals) {
                 Write-Warning "You are about to delete an service principal which may be associated with one or more Azure resources"
                 Remove-AzADServicePrincipal -ObjectId $existingAzADServicePrincipal.ObjectId -Force -Confirm -Verbose
@@ -160,7 +160,7 @@ $ModulesList | ForEach-Object { Import-Module $PSItem }
 if (((Get-AzContext).Subscription.Id -ne $subscriptionID) -or (Get-AzContext).Tenant.Id -ne $tenantID) {
     Connect-AzAccount -Tenant $tenantName -SubscriptionId $subscriptionID -Verbose
 }
-Connect-AzureAD -AzureEnvironmentName $azureEnvironment -TenantId $tenantID
+Connect-AzureAD -AzureEnvironmentName $azureEnvironment -TenantId $tenantIDy
 
 # Prepare the Azure subscription
 foreach ($AzResourceProvider in $AzResourceProviders) {
@@ -176,7 +176,7 @@ if ($null -ne $(Get-AzResourceGroup -Name $("rg", $ApplicationName -join $null) 
     Write-Error "Duplicate Azure Resource Group detected.  Exiting script"; Exit
 }
 New-AzResourceGroup -Name $("rg", $ApplicationName -join $null) -Location $location
-New-AzResourceGroupDeployment -ResourceGroupName $("rg", $ApplicationName -join $null) -Mode Complete -Name "Deployment_$ApplicationName" -DeploymentDebugLogLevel All -TemplateFile .\template.json -TemplateParameterFile .\parameters.$ApplicationName.json
+New-AzResourceGroupDeployment -ResourceGroupName $("rg", $ApplicationName -join $null) -Mode Complete -Name "Deployment_$ApplicationName" -TemplateFile .\template.json -TemplateParameterFile .\parameters.$ApplicationName.json
 #
 
 $ApplicationServicePrincipal = New-AzAutomationRunAsAccount
