@@ -153,27 +153,20 @@ function New-AzAutomationRunAsAccount {
 }
 
 function CreateUploadScript {
-    $scriptBody = @"
-    
-    @("Az.Accounts", "Az.Storage") | ForEach-Object { Import-Module `$PSItem }
-    if (((Get-AzContext).Subscription.Id -ne "$subscriptionID") -or (Get-AzContext).Tenant.Id -ne "$tenantID") { 
-        Connect-AzAccount -Tenant "$tenantName" -SubscriptionId "$subscriptionID" -Verbose
-    }
-    if (!(Test-Path "$ApplicationName.ipa") -or (!(Test-Path "$ApplicationName.ipa.ps1"))) { 
-        Write-Error "Path specified not valid"; exit 
-    }
-    `$storageContext = (Get-AzStorageAccount -ResourceGroupName "$resourceGroupName" -Name "$storacctName").Context
-    `$storacctContainer = Get-AzStorageContainer -Context `$storageContext -Name "$storacctBlobName"
-    Get-ChildItem -Filter "$ApplicationName.*" | ForEach-Object { Set-AzStorageBlobContent -File `$PSItem -Container $($storacctContainer.Name) -Context `$storageContext -Force -BlobType Block }
-    
-    # Upload the .ipa and .ps1 files
-    Set-AzStorageBlobContent -File "$ApplicationName.ipa" -Container $($storacctContainer.Name) -Context `$storageContext -Force -BlobType Block
-    Set-AzStorageBlobContent -File "$ApplicationName.ipa.ps1" -Container $($storacctContainer.Name) -Context `$storageContext -Force -BlobType Block
-
-"@
-
-Set-Content -Path .\Upload-FileToAzBlob.ps1 -Value $scriptBody -Force
-
+$scriptBody = "
+Import-Module @(`"Az.Accounts`", `"Az.Storage`")
+if (((Get-AzContext).Subscription.Id -ne `"$subscriptionID`") -or (Get-AzContext).Tenant.Id -ne `"$tenantID`") { 
+    Connect-AzAccount -Tenant `"$tenantName`" -SubscriptionId `"$subscriptionID`" -Verbose
+}
+if (!(Test-Path `"$ApplicationName.ipa`") -or (!(Test-Path `"$ApplicationName.ipa.ps1`"))) { 
+    Write-Error `"Path specified not valid`"; exit 
+}
+`$storageContext = (Get-AzStorageAccount -ResourceGroupName `"$resourceGroupName`" -Name `"$storacctName`").Context
+`$storacctContainer = Get-AzStorageContainer -Context `$storageContext -Name `"$storacctBlobName`"
+# Upload the .ipa and .ps1 files
+Get-ChildItem -Filter `"$ApplicationName.*`" | ForEach-Object { Set-AzStorageBlobContent -File `$PSItem -Container `$(`$storacctContainer.Name) -Context `$storageContext -Force -BlobType Block }
+"
+return $scriptBody
 } 
 #endregion Functions
 
@@ -233,7 +226,7 @@ foreach ($AzResourceProvider in $AzResourceProviders) {
     }
 }
 
-# Build the required resources using JSON template and parameters files 
+# Build the required resources using JSON template and parameters files
 # Uncomment when testing second app
 (Get-Content .\parameters.json).Replace("IOSLOBAPPNAME", $ApplicationName.ToLower()) | Set-Content .\parameters.$ApplicationName.json -Force
 if ($null -ne $(Get-AzResourceGroup -Name $("rg", $ApplicationName -join $null) -Location $location -ErrorAction SilentlyContinue)) {
@@ -272,7 +265,13 @@ $automationVariables.GetEnumerator().ForEach({ New-AzAutomationVariable -Resourc
 #endregion Prepare the automation account
 
 #region Prepare the event grid
-New-AzEventGridSubscription -ResourceId $(Get-AzResource -ResourceGroupName $resourceGroupName -Name $storacctName).ResourceId -EventSubscriptionName $eventGridSubscriptionName -Endpoint $aaRunbookWebhook.WebhookURI -EndpointType webhook -IncludedEventType @("Microsoft.Storage.BlobCreated")
+$advFilter1 = @{
+    operator = "StringEndsWith"
+    key = "Subject"
+    Values = ".ps1"
+}
+$advFilters = $advFilter1
+New-AzEventGridSubscription -ResourceId $(Get-AzResource -ResourceGroupName $resourceGroupName -Name $storacctName).ResourceId -EventSubscriptionName $eventGridSubscriptionName -Endpoint $aaRunbookWebhook.WebhookURI -EndpointType webhook -IncludedEventType @("Microsoft.Storage.BlobCreated") -AdvancedFilter $advFilters
 #endregion Prepare the event grid
 
 
@@ -285,6 +284,10 @@ Write-Warning "Allowing time for module import to process; please be patient"
 $aaModulesList | ForEach-Object { Import-ModulesFromPSGalleryToModuleShare $PSItem }
 $aaModulesRemoveList | ForEach-Object { Remove-AzAutomationModule -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $PSItem -Force -ErrorAction SilentlyContinue }
 #endregion Prepare the automation runbook
+
+#region Create the Upload script file (Upload-FileToAzBlob.ps1)
+Add-Content -Path .\Upload-FileToAzBlob.ps1 -Value $(CreateUploadScript)
+#endregion Create the Upload script file (Upload-FileToAzBlob.ps1)
 
 Stop-Transcript -Verbose
 
