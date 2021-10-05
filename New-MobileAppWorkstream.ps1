@@ -188,8 +188,7 @@ $presetsSpecific = @{
 $presetsGeneral = @{
     AzResourceProviders                  = @("Microsoft.EventGrid")
     ModulesList                          = @("Az.Accounts", "Az.Automation", "Az.Storage", "AzureAD", "Microsoft.Graph.Intune")
-    aaModulesList                        = @("Az.Accounts", "AzureAD", "Microsoft.Graph.Intune", "Az.Automation", "Az.Storage")
-    aaModulesRemoveList                  = @("Azure", "Azure.Storage", "AzureRM.Automation", "AzureRM.Compute", "AzureRM.Profile", "AzureRM.Resources", "AzureRM.SQL", "AzureRM.Storage")
+    aaModulesList                        = @("AzureAD", "Microsoft.Graph.Intune")
     transcriptPath                       = ".\NewMobileAppWorkstream.$ApplicationName.log"
     resourceGroupName                    = $("rg", $ApplicationName.ToLower() -join $null)
     storacctName                         = $("sa", $ApplicationName.ToLower() -join $null)
@@ -228,8 +227,7 @@ Start-Transcript -Path $transcriptPath -Verbose
 $certPWGlobal = Get-RandomPassword -AsSecureString
 $ClientSecret = Get-RandomPassword -AsSecureString
 
-# Immediately enter ClientSecret into KeyVault
-Set-AzKeyVaultSecret -VaultName $keyVaultName -Name "SPClientSecret" -SecretValue $ClientSecret -Expires ([datetime]::Now.AddMonths($selfSignedCertNoOfMonthsUntilExpired)) -NotBefore ([datetime]::Now)
+
 
 # Prepare the PowerShell runspace
 $ModulesList | ForEach-Object { Import-Module $PSItem }
@@ -256,37 +254,39 @@ New-AzResourceGroupDeployment -ResourceGroupName $("rg", $ApplicationName -join 
 # Creating the service principal and all of its moving parts
 $ApplicationServicePrincipal = New-AzAutomationRunAsAccount
 
+# Enter ClientSecret into KeyVault and set policy for service principal to access it
+Set-AzKeyVaultSecret -VaultName $keyVaultName -Name "SPClientSecret" -SecretValue $ClientSecret -Expires ([datetime]::Now.AddMonths($selfSignedCertNoOfMonthsUntilExpired)) -NotBefore ([datetime]::Now) -Verbose
+Set-AzKeyVaultAccessPolicy -VaultName $keyVaultName -ResourceGroupName $resourceGroupName -ServicePrincipalName $aaAccountName -PermissionsToSecrets @("Get","List") -Verbose 
+
 #region Prepare the storage account
-### Rights for application/service principal to storage account, or use storageaccount keys?
 $storageContext = (Get-AzStorageAccount -ResourceGroupName $resourceGroupName -Name $storacctName).Context
 New-AzStorageContainer -Name $storacctBlobName -Context $storageContext -OutVariable storacctContainer -Verbose
+New-AzStorageContainerStoredAccessPolicy -Context $storageContext -Container $storacctBlobName -Policy "$aaAccountName Policy" -Permission @("Read","List","Delete") -StartTime ([datetime]::Now) -ExpiryTime ([datetime]::Now.AddMonths($selfSignedCertNoOfMonthsUntilExpired)) -Verbose
 #endregion Prepare the storage account
-
-#region Prepare the automation account
-Import-AzAutomationRunbook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Path ".\Publish-Lob.Runbook.ps1" -Type PowerShell -Name $aaRunbookName -Description "Publishing pipeline" -Published
-$aaRunbookWebhook = New-AzAutomationWebhook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $aaRunbookWebhookName -RunbookName $aaRunbookName -IsEnabled $true -ExpiryTime ([datetime]::Now).AddYears(3) -confirm:$false
-$automationVariables = @{
-    #"StorageAccountKey1" = $storageAccountKeys[0].Value
-    #"StorageAccountKey2" = $storageAccountKeys[1].Value
-    "ApplicationID"      = $ApplicationServicePrincipal.ApplicationId
-    #"LOBType"            = "microsoft.graph.iosLOBApp"
-    "CloudBlobContainer" = $storacctBlobName
-    "ApplicationName"    = $ApplicationName
-    #"ClientSecret"       = $([System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ClientSecret)))
-}
-
-$automationVariables.GetEnumerator().ForEach({ New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $PSItem.Key -Value $PSItem.Value -Encrypted $false -Verbose })
-#endregion Prepare the automation account
 
 #region Prepare the event grid
 New-AzEventGridSubscription -ResourceId $(Get-AzResource -ResourceGroupName $resourceGroupName -Name $storacctName).ResourceId -EventSubscriptionName $eventGridSubscriptionName -Endpoint $aaRunbookWebhook.WebhookURI -EndpointType webhook -IncludedEventType @("Microsoft.Storage.BlobCreated") -AdvancedFilter @{operator = "StringEndsWith"; key = "Subject"; Values = @(".ps1") }
 #endregion Prepare the event grid
 
+#region Prepare the automation account
+Import-AzAutomationRunbook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Path ".\Publish-Lob.Runbook.ps1" -Type PowerShell -Name $aaRunbookName -Description "Publishing pipeline" -Published
+$aaRunbookWebhook = New-AzAutomationWebhook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $aaRunbookWebhookName -RunbookName $aaRunbookName -IsEnabled $true -ExpiryTime ([datetime]::Now).AddYears(3) -confirm:$false
+$automationVariables = @{
+    "ApplicationID"      = $ApplicationServicePrincipal.ApplicationId
+    #"LOBType"            = "microsoft.graph.iosLOBApp"
+    "CloudBlobContainer" = $storacctBlobName
+    "ApplicationName"    = $ApplicationName
+}
+
+$automationVariables.GetEnumerator().ForEach({ New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $PSItem.Key -Value $PSItem.Value -Encrypted $false -Verbose })
+#endregion Prepare the automation account
+
 #region Prepare the automation runbook
 Write-Verbose "Updating Azure modules on Automation Account"
 Write-Warning "Allowing time for module import to process; please be patient"
-$aaModulesList | ForEach-Object { Import-ModulesFromPSGalleryToModuleShare $PSItem }
+$aaModulesRemoveList = $(Get-AzAutomationModule -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName) | Where-Object {$PSItem.Name -like "Azure*"} | Select-Object -Property Name
 $aaModulesRemoveList | ForEach-Object { Remove-AzAutomationModule -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $PSItem -Force -ErrorAction SilentlyContinue }
+$aaModulesList | ForEach-Object { Import-ModulesFromPSGalleryToModuleShare $PSItem }
 #endregion Prepare the automation runbook
 
 #region Create the Upload script file (Upload-FileToAzBlob.ps1)

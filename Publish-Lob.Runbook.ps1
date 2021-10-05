@@ -300,7 +300,7 @@ Connect-AzAccount -ServicePrincipal -Tenant $ServicePrincipalConnection.TenantId
 Set-AzContext -SubscriptionId $ServicePrincipalConnection.SubscriptionID -OutVariable AzureContext | Out-Null
 
 # Import the necessary modules
-@("Az.Storage", "Az.Accounts", "Microsoft.Graph.Intune") | ForEach-Object { Import-Module $PSItem }
+@("Microsoft.Graph.Intune") | ForEach-Object { Import-Module $PSItem }
 
 # Hydrate the variables
 $applicationName = Get-AutomationVariable -Name "ApplicationName"
