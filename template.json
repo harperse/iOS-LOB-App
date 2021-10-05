@@ -75,7 +75,6 @@
                     "name": "standard",
                     "family": "A"
                 },
-                "enableRbacAuthorization": true,
                 "tenantId": "[parameters('tenantId')]"
             }
         },
