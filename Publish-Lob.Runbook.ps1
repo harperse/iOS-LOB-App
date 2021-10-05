@@ -291,16 +291,17 @@ function Set-LobApp {
 #endregion Functions
 
 #region Azure authentication and file download
+
+# Import the necessary modules
+@("Az.Accounts", "Az.Storage", "Az.Automation", "Microsoft.Graph.Intune") | ForEach-Object { Import-Module $PSItem }
+
 # Ensure that the runbook does not inherit an AzContext
 Disable-AzContextAutosave -Scope Process | Out-Null
 
 # Connect to Azure with Run As account/service principal created for the automation account
 $ServicePrincipalConnection = Get-AutomationConnection -Name 'AzureRunAsConnection' -ErrorAction Stop
-Connect-AzAccount -ServicePrincipal -Tenant $ServicePrincipalConnection.TenantId -ApplicationId $ServicePrincipalConnection.ApplicationId -CertificateThumbprint $ServicePrincipalConnection.CertificateThumbprint | Out-Null
-Set-AzContext -SubscriptionId $ServicePrincipalConnection.SubscriptionID -OutVariable AzureContext | Out-Null
-
-# Import the necessary modules
-@("Microsoft.Graph.Intune") | ForEach-Object { Import-Module $PSItem }
+Connect-AzAccount -ServicePrincipal -Tenant $ServicePrincipalConnection.TenantId -ApplicationId $ServicePrincipalConnection.ApplicationId -CertificateThumbprint $ServicePrincipalConnection.CertificateThumbprint
+Set-AzContext -SubscriptionId $ServicePrincipalConnection.SubscriptionID -OutVariable AzureContext
 
 # Hydrate the variables
 $applicationName = Get-AutomationVariable -Name "ApplicationName"
@@ -320,7 +321,7 @@ if ((Test-Path "$PWD\$applicationName.ipa") -and (Test-Path "$PWD\$applicationNa
     Remove-AzStorageBlob -Context $storageContext -Blob "$ApplicationName.ipa.ps1" -Container $CloudBlobContainer
 }
 else { "Unable to get files from Azure storage"; exit }
-Disconnect-AzAccount
+#Disconnect-AzAccount
 #endregion Azure authentication and file download
 
 #region Intune Graph application creation or update
