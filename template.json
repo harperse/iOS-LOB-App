@@ -1,25 +1,51 @@
 {
     "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
     "contentVersion": "1.0.0.0",
+    "variables": {},
     "parameters": {
-        "storageAccounts_name": {
-            "defaultValue": "saIOSLOBAPPNAME",
-            "type": "String"
+        "location": {
+            "type": "string",
+            "metadata": {
+                "description": "Azure location for the resources"
+            }
         },
-        "systemTopics_name": {
-            "defaultValue": "bmIOSLOBAPPNAME",
-            "type": "String"
+        "tenantId": {
+            "type": "string",
+            "metadata": {
+                "description": "Tenant ID of the base tenant associated with the subscription where the key vault exists"
+            }
         },
         "automationAccounts_name": {
-            "defaultValue": "aaIOSLOBAPPNAME",
-            "type": "String"
+            "type": "string",
+            "metadata": {
+                "description": "Automation account name"
+            }
+        },
+        "storageAccounts_name": {
+            "type": "string",
+            "metadata": {
+                "description": "Storage Account name"
+            }
+        },
+        "keyVault_name": {
+            "type": "string",
+            "metadata": {
+                "description": "Key Vault name"
+            }
         },
         "blobContainer_Name": {
-            "defaultValue": "blobIOSLOBAPPNAME",
-            "type": "string"
+            "type": "string",
+            "metadata": {
+                "description": "Blob Container name"
+            }
+        },
+        "systemTopics_name": {
+            "type": "string",
+            "metadata": {
+                "description": "Event Grid system topic name"
+            }
         }
     },
-    "variables": {},
     "resources": [
         {
             "type": "Microsoft.Automation/automationAccounts",
@@ -40,7 +66,7 @@
             "type": "Microsoft.KeyVault/vaults",
             "apiVersion": "2021-04-01-preview",
             "name": "[parameters('keyVault_name')]",
-            "location": "East US",
+            "location": "[parameters('location')]",
             "properties": {
                 "enableSoftDelete": true,
                 "enabledForDeployment": true,

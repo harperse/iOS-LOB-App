@@ -14,11 +14,14 @@
         "blobContainer_Name": {
             "value": "blobIOSLOBAPPNAME"
         },
-        "keyVault_name":{
+        "keyVault_name": {
             "value": "kvIOSLOBAPPNAME"
         },
         "tenantId": {
             "value": "TENANTIDREPLACE"
+        },
+        "location": {
+            "value": "eastus"
         }
     }
 }
