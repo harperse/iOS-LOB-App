@@ -55,7 +55,6 @@ function CreateServicePrincipal {
     }
     else {
         $Application = New-AzADApplication -DisplayName $aaAccountName -HomePage ("http://" + $aaAccountName) -IdentifierUris ("http://" + $keyId) -Verbose -Password $ClientSecret
-        
     }
     
 
@@ -218,13 +217,19 @@ foreach ($presetGeneral in $presetsGeneral.GetEnumerator()) {
     New-Variable -Name $presetGeneral.Key -Value $presetGeneral.Value -Force -Verbose
 }
 
-if (Test-Path $transcriptPath) {
-    Remove-Item $transcriptPath -Force -Verbose
+if (Test-Path $transcriptPath) { 
+    Remove-Item $transcriptPath -Force -Verbose 
 }
+
+# Start the session transcript
 Start-Transcript -Path $transcriptPath -Verbose
 
+# Generate passwords for certificate and client secret
 $certPWGlobal = Get-RandomPassword -AsSecureString
 $ClientSecret = Get-RandomPassword -AsSecureString
+
+# Immediately enter ClientSecret into KeyVault
+Set-AzKeyVaultSecret -VaultName $keyVaultName -Name "SPClientSecret" -SecretValue $ClientSecret -Expires ([datetime]::Now.AddMonths($selfSignedCertNoOfMonthsUntilExpired)) -NotBefore ([datetime]::Now)
 
 # Prepare the PowerShell runspace
 $ModulesList | ForEach-Object { Import-Module $PSItem }
@@ -233,13 +238,15 @@ $ModulesList | ForEach-Object { Import-Module $PSItem }
 if (((Get-AzContext).Subscription.Id -ne $subscriptionID) -or (Get-AzContext).Tenant.Id -ne $tenantID) {
     Connect-AzAccount -Tenant $tenantName -SubscriptionId $subscriptionID -Verbose
 }
-Connect-AzureAD -AzureEnvironmentName $azureEnvironment -TenantId $tenantID
+Connect-AzureAD -AzureEnvironmentName $azureEnvironment -TenantId $tenantID -Verbose
 
 # Prepare the Azure subscription
-Register-AzResourceProvider -ProviderNamespace $AzResourceProvider
+Register-AzResourceProvider -ProviderNamespace $AzResourceProvider -Verbose
 
 # Build the required resources using JSON template and parameters files
-(Get-Content .\parameters.json).Replace("IOSLOBAPPNAME", $ApplicationName.ToLower()).Replace("TENANTIDREPLACE",$tenantID) | Set-Content .\parameters.$ApplicationName.json -Force
+(Get-Content .\parameters.json).Replace("IOSLOBAPPNAME", $ApplicationName.ToLower()).Replace("TENANTIDREPLACE", $tenantID) | Set-Content .\parameters.$ApplicationName.json -Force
+
+# Create the resource group; NOTE: The script will stop if a duplicate resource name is detected
 if ($null -ne $(Get-AzResourceGroup -Name $("rg", $ApplicationName -join $null) -Location $location -ErrorAction SilentlyContinue)) {
     Write-Error "Duplicate Azure Resource Group detected.  Exiting script"; Exit
 }
@@ -265,7 +272,7 @@ $automationVariables = @{
     #"LOBType"            = "microsoft.graph.iosLOBApp"
     "CloudBlobContainer" = $storacctBlobName
     "ApplicationName"    = $ApplicationName
-    "ClientSecret"       = $([System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ClientSecret)))
+    #"ClientSecret"       = $([System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ClientSecret)))
 }
 
 $automationVariables.GetEnumerator().ForEach({ New-AzAutomationVariable -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $PSItem.Key -Value $PSItem.Value -Encrypted $false -Verbose })
