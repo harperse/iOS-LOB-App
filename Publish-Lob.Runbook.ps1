@@ -293,7 +293,6 @@ function Set-LobApp {
 #region Azure authentication and file download
 # Ensure that the runbook does not inherit an AzContext
 Disable-AzContextAutosave -Scope Process | Out-Null
-$VerbosePreference = 
 
 # Connect to Azure with Run As account/service principal created for the automation account
 $ServicePrincipalConnection = Get-AutomationConnection -Name 'AzureRunAsConnection' -ErrorAction Stop
@@ -306,9 +305,11 @@ Set-AzContext -SubscriptionId $ServicePrincipalConnection.SubscriptionID -OutVar
 # Hydrate the variables
 $applicationName = Get-AutomationVariable -Name "ApplicationName"
 $cloudBlobContainer = Get-AutomationVariable -Name "cloudBlobContainer"
+$resourceGroupName = $("rg", $(Get-AutomationVariable -Name "ApplicationName") -join $null)
+$storacctName = $("sa", $(Get-AutomationVariable -Name "ApplicationName").ToLower() -join $null)
 
 # Get the files from the storage account
-$storageContext = $(Get-AzStorageAccount -ResourceGroupName $("rg", $(Get-AutomationVariable -Name "ApplicationName") -join $null) -Name $("sa", $(Get-AutomationVariable -Name "ApplicationName").ToLower() -join $null)).Context
+$storageContext = $(Get-AzStorageAccount -ResourceGroupName $resourceGroupName -Name $storacctName).Context
 Get-AzStorageBlobContent -Context $storageContext -Blob "$ApplicationName.ipa" -Container $cloudBlobContainer -Destination "$pwd\$ApplicationName.ipa" | Out-Null
 Get-AzStorageBlobContent -Context $storageContext -Blob "$ApplicationName.ipa.ps1" -Container $cloudBlobContainer -Destination "$pwd\$ApplicationName.ipa.ps1" | Out-Null
 
@@ -327,7 +328,7 @@ Disconnect-AzAccount
 # The AuthUrl ends with the TenantID of the authenticating tenant
 # The ClientSecret is an application level password specifically created for the service principal tied to the automation account
 Update-MsGraphEnvironment -AppId $ServicePrincipalConnection.ApplicationId -AuthUrl $("https://login.microsoftonline.com", $ServicePrincipalConnection.TenantId -join "/") -Quiet
-Connect-MSGraph -ClientSecret $(Get-AutomationVariable -Name "ClientSecret") -Quiet
+Connect-MSGraph -ClientSecret $(Get-AutomationVariable -Name "ClientSecret") -Verbose
 
 # Import the variables for building the package
 $appPropertiesFile = Join-Path -Path $PWD -ChildPath "$applicationName.ipa.ps1"

@@ -5,3 +5,5 @@ iOS LOB App.vsdx
 scratch*.*
 *.log
 *.*.json
+test.ps1
+Upload-FileToAzBlob.ps1

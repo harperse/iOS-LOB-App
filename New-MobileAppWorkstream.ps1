@@ -36,10 +36,10 @@ function Import-ModulesFromPSGalleryToModuleShare {
     [CmdletBinding()]
     param ([Parameter(Mandatory = $true)][string]$ModuleName)
     $moduleURI = "https://www.powershellgallery.com/api/v2/package/$ModuleName"
-    Write-Output "Installing $ModuleName"
+    Write-Verbose "Installing $ModuleName"
     New-AzAutomationModule -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $ModuleName -ContentLinkUri $moduleURI -Verbose
     do {
-        Write-Output "Installing $ModuleName"; Start-Sleep -Seconds 15
+        Write-Verbose "Installing $ModuleName"; Start-Sleep -Seconds 15
     } while ((Get-AzAutomationModule -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $ModuleName).Status -eq "Importing")
 }
 
@@ -64,7 +64,7 @@ function CreateServicePrincipal {
         Remove-AzADAppCredential -DisplayName $ApplicationName -Force -Verbose
     }
     else {
-        Write-Output "Creating application credential object"
+        Write-Verbose "Creating application credential object"
         New-AzADAppCredential -ApplicationId $Application.ApplicationId -CertValue $keyValue -StartDate $PfxCert.NotBefore -EndDate $PfxCert.NotAfter -Verbose
     }
 
@@ -74,13 +74,13 @@ function CreateServicePrincipal {
             $existingAzADServicePrincipals = Get-AzADServicePrincipal -DisplayName $aaAccountName -ErrorAction SilentlyContinue
             foreach ($existingAzADServicePrincipal in $existingAzADServicePrincipals) {
                 Write-Warning "You are about to delete an service principal which may be associated with one or more Azure resources"
-                Remove-AzADServicePrincipal -ObjectId $existingAzADServicePrincipal.ObjectId -Force -Confirm -Verbose
+                Remove-AzADServicePrincipal -ObjectId $existingAzADServicePrincipal.ObjectId -Force -Verbose
             }
-            Write-Output "Creating service principal object"
+            Write-Verbose "Creating service principal object"
             New-AzADServicePrincipal -ApplicationId $Application.ApplicationId -OutVariable ServicePrincipal -StartDate $PfxCert.NotBefore -EndDate $PfxCert.NotAfter -Verbose
         }
         Default { 
-            Write-Output "Creating service principal object"
+            Write-Verbose "Creating service principal object"
             New-AzADServicePrincipal -ApplicationId $Application.ApplicationId -OutVariable ServicePrincipal -StartDate $PfxCert.NotBefore -EndDate $PfxCert.NotAfter -Verbose 
         }
     }
@@ -90,12 +90,13 @@ function CreateServicePrincipal {
     #$deviceManagementAppsRole = New-Object "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList @("78145de6-330d-4800-a6ce-494ff2d33d07", "Role")
     $requiredResourceAccess = New-Object "Microsoft.Open.AzureAD.Model.RequiredResourceAccess"
     $requiredResourceAccess.ResourceAppId = $(Get-AzADServicePrincipal -ApplicationId $Application.ApplicationId).ApplicationId
-    $requiredResourceAccess.ResourceAccess = $(New-Object "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList @("78145de6-330d-4800-a6ce-494ff2d33d07", "Role"))
+    #$requiredResourceAccess.ResourceAccess = $(New-Object "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList @("78145de6-330d-4800-a6ce-494ff2d33d07", "Role"))
+    $requiredResourceAccess.ResourceAccess = $(New-Object "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList @("DeviceManagementApps.ReadWriteAll", "Role"))
     Set-AzureADApplication -ObjectId $Application.ObjectId -RequiredResourceAccess $requiredResourceAccess
-    #Invoke-RestMethod -Uri "https://login.microsoftonline.com/$tenantID/adminconsent?client_id=$($Application.ObjectId)" -Method Get
-
+    
+    
     # Sleep here for a few seconds to allow the service principal application to become active (ordinarily takes a few seconds)
-    Write-Output "Pausing to allow the service principal application to become active"
+    Write-Verbose "Pausing to allow the service principal application to become active"
     Start-Sleep -Seconds 15
 
     # Requires User Access Administrator or Owner.
@@ -124,7 +125,7 @@ function New-AzAutomationRunAsAccount {
             Write-Warning "You are about to delete an application which may be associated with one or more Azure resources"
             $existingAzADApplications = Get-AzADApplication -DisplayName $aaAccountName
             foreach ($existingAzADApplication in $existingAzADApplications) {
-                Remove-AzADApplication -ObjectId $existingAzADApplication.ObjectId -Force -Confirm -Verbose
+                Remove-AzADApplication -ObjectId $existingAzADApplication.ObjectId -Force -Verbose
             }
             $ApplicationId = CreateServicePrincipal
         }
@@ -132,18 +133,18 @@ function New-AzAutomationRunAsAccount {
     }   
 
     # Create the Automation certificate asset
-    Write-Output "Removing default automation certificate"
+    Write-Verbose "Removing default automation certificate"
     Remove-AzAutomationCertificate -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $CertificateAssetName -ErrorAction SilentlyContinue -Verbose
-    Write-Output "Creating correct automation certificate"
+    Write-Verbose "Creating correct automation certificate"
     New-AzAutomationCertificate -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Path $PfxCertPathForRunAsAccount -Name $CertificateAssetName -Password $certPWGlobal -Exportable -Verbose
 
     # Populate the ConnectionFieldValues
     $ConnectionFieldValues = @{"ApplicationId" = $ApplicationId.ApplicationId; "TenantId" = $tenantID; "CertificateThumbprint" = $PfxCert.Thumbprint; "SubscriptionId" = $subscriptionID }
 
     # Create an Automation connection asset named AzureRunAsConnection in the Automation account. This connection uses the service principal.
-    Write-Output "Removing default automation connection"
+    Write-Verbose "Removing default automation connection"
     Remove-AzAutomationConnection -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $connectionAssetName -Force -ErrorAction SilentlyContinue -Verbose
-    Write-Output "Creating correct automation connection using service principal"
+    Write-Verbose "Creating correct automation connection using service principal"
     New-AzAutomationConnection -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $connectionAssetName -ConnectionTypeName $connectionTypeName -ConnectionFieldValues $connectionFieldValues
 
     Remove-Item $PfxCertPathForRunAsAccount
@@ -153,7 +154,7 @@ function New-AzAutomationRunAsAccount {
 }
 
 function CreateUploadScript {
-$scriptBody = "
+    $scriptBody = "
 Import-Module @(`"Az.Accounts`", `"Az.Storage`")
 if (((Get-AzContext).Subscription.Id -ne `"$subscriptionID`") -or (Get-AzContext).Tenant.Id -ne `"$tenantID`") { 
     Connect-AzAccount -Tenant `"$tenantName`" -SubscriptionId `"$subscriptionID`" -Verbose
@@ -166,7 +167,7 @@ if (!(Test-Path `"$ApplicationName.ipa`") -or (!(Test-Path `"$ApplicationName.ip
 # Upload the .ipa and .ps1 files
 Get-ChildItem -Filter `"$ApplicationName.*`" | ForEach-Object { Set-AzStorageBlobContent -File `$PSItem -Container `$(`$storacctContainer.Name) -Context `$storageContext -Force -BlobType Block }
 "
-return $scriptBody
+    return $scriptBody.Trim()
 } 
 #endregion Functions
 
@@ -174,6 +175,7 @@ return $scriptBody
 
 Clear-Host
 $Error.Clear()
+$script:ConfirmPreference = [System.Management.Automation.ConfirmImpact]::None
 
 New-Variable -Name "tenantName" -Value "azinwcb089outlook.onmicrosoft.com" -Force
 New-Variable -Name "tenantID" -Value "40116f04-90e9-4f3d-a895-152754654561" -Force
@@ -250,7 +252,7 @@ $storageAccountKeys = Get-AzStorageAccountKey -ResourceGroupName $resourceGroupN
 
 #region Prepare the automation account
 Import-AzAutomationRunbook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Path ".\Publish-Lob.Runbook.ps1" -Type PowerShell -Name $aaRunbookName -Description "Publishing pipeline" -Published
-$aaRunbookWebhook = New-AzAutomationWebhook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $aaRunbookWebhookName -RunbookName $aaRunbookName -IsEnabled $true -ExpiryTime ([datetime]::Now).AddYears(3)
+$aaRunbookWebhook = New-AzAutomationWebhook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $aaRunbookWebhookName -RunbookName $aaRunbookName -IsEnabled $true -ExpiryTime ([datetime]::Now).AddYears(3) -confirm:$false
 $automationVariables = @{
     "StorageAccountKey1" = $storageAccountKeys[0].Value
     "StorageAccountKey2" = $storageAccountKeys[1].Value
@@ -265,13 +267,7 @@ $automationVariables.GetEnumerator().ForEach({ New-AzAutomationVariable -Resourc
 #endregion Prepare the automation account
 
 #region Prepare the event grid
-$advFilter1 = @{
-    operator = "StringEndsWith"
-    key = "Subject"
-    Values = ".ps1"
-}
-$advFilters = $advFilter1
-New-AzEventGridSubscription -ResourceId $(Get-AzResource -ResourceGroupName $resourceGroupName -Name $storacctName).ResourceId -EventSubscriptionName $eventGridSubscriptionName -Endpoint $aaRunbookWebhook.WebhookURI -EndpointType webhook -IncludedEventType @("Microsoft.Storage.BlobCreated") -AdvancedFilter $advFilters
+New-AzEventGridSubscription -ResourceId $(Get-AzResource -ResourceGroupName $resourceGroupName -Name $storacctName).ResourceId -EventSubscriptionName $eventGridSubscriptionName -Endpoint $aaRunbookWebhook.WebhookURI -EndpointType webhook -IncludedEventType @("Microsoft.Storage.BlobCreated") -AdvancedFilter @{operator = "StringEndsWith"; key = "Subject"; Values = @(".ps1") }
 #endregion Prepare the event grid
 
 
@@ -279,14 +275,14 @@ New-AzEventGridSubscription -ResourceId $(Get-AzResource -ResourceGroupName $res
 # Uncomment when testing second app
 $aaModulesList = @("Az.Accounts", "AzureAD", "Microsoft.Graph.Intune", "Az.Automation", "Az.Storage")
 $aaModulesRemoveList = @("Azure", "Azure.Storage", "AzureRM.Automation", "AzureRM.Compute", "AzureRM.Profile", "AzureRM.Resources", "AzureRM.SQL", "AzureRM.Storage")
-Write-Output "Updating Azure modules on Automation Account"
+Write-Verbose "Updating Azure modules on Automation Account"
 Write-Warning "Allowing time for module import to process; please be patient"
 $aaModulesList | ForEach-Object { Import-ModulesFromPSGalleryToModuleShare $PSItem }
 $aaModulesRemoveList | ForEach-Object { Remove-AzAutomationModule -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $PSItem -Force -ErrorAction SilentlyContinue }
 #endregion Prepare the automation runbook
 
 #region Create the Upload script file (Upload-FileToAzBlob.ps1)
-Add-Content -Path .\Upload-FileToAzBlob.ps1 -Value $(CreateUploadScript)
+Add-Content -Path .\Upload-FileToAzBlob.ps1 -Value $(CreateUploadScript) -Force
 #endregion Create the Upload script file (Upload-FileToAzBlob.ps1)
 
 Stop-Transcript -Verbose
