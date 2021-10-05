@@ -12,24 +12,18 @@ param (
 
 #region Functions
 function Get-RandomPassword {
-    #CODE COMPLETE
-
     [CmdletBinding()]
-    param (
-        [Parameter()][switch]$AsSecureString
-    )
+    [OutputType([SecureString])]
 
     $seedLength = Get-Random -Minimum 6 -Maximum 16
     $password = [string]::Empty
     for ($i = 0; $i -lt $seedLength; $i++) {
         $password = $password + [char]$(Get-Random -Minimum 48 -Maximum 57 )
-        $password = $password + [char]$(Get-Random -Minimum 97 -Maximum 122)
+        $password = $password + [char]$(Get-Random -Minimum 97 -Maximum 122 )
     }
-    if ($AsSecureString) {
-        $password = ConvertTo-SecureString -String $password -AsPlainText -Force
-    }
+    $password = ConvertTo-SecureString -String $password -AsPlainText -Force
     return $password
-}
+} # End function Get-RandomPassword
 
 function Import-ModulesFromPSGalleryToModuleShare {
     # CODE COMPLETE
@@ -41,48 +35,35 @@ function Import-ModulesFromPSGalleryToModuleShare {
     do {
         Write-Verbose "Installing $ModuleName"; Start-Sleep -Seconds 15
     } while ((Get-AzAutomationModule -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $ModuleName).Status -eq "Importing")
-}
+} # End function Import-ModulesFromPSGalleryToModuleShare
 
 function CreateServicePrincipal {
-    # CODE COMPLETE
+    # Requires Application administrator or GLOBAL ADMIN
     $keyValue = [System.Convert]::ToBase64String($PfxCert.GetRawCertData())
     $keyId = (New-Guid).Guid
 
     # Create an Azure AD application, AD App Credential, AD ServicePrincipal
-    # Requires Application Developer Role, but works with Application administrator or GLOBAL ADMIN
     if (Get-AzADApplication -DisplayName $ApplicationName) {
         Remove-AzADApplication -DisplayName $ApplicationName -Force -Verbose
     }
-    else {
-        $Application = New-AzADApplication -DisplayName $aaAccountName -HomePage ("http://" + $aaAccountName) -IdentifierUris ("http://" + $keyId) -Verbose -Password $ClientSecret
-    }
-    
+    $Application = New-AzADApplication -DisplayName $aaAccountName -HomePage ("http://" + $aaAccountName) -IdentifierUris ("http://" + $keyId) -Verbose -Password $ClientSecret
 
-    # Requires Application administrator or GLOBAL ADMIN
     if (Get-AzADAppCredential -DisplayName $ApplicationName -ErrorAction SilentlyContinue) {
         Remove-AzADAppCredential -DisplayName $ApplicationName -Force -Verbose
     }
-    else {
-        Write-Verbose "Creating application credential object"
-        New-AzADAppCredential -ApplicationId $Application.ApplicationId -CertValue $keyValue -StartDate $PfxCert.NotBefore -EndDate $PfxCert.NotAfter -Verbose
+    Write-Verbose "Creating application credential object"
+    New-AzADAppCredential -ApplicationId $Application.ApplicationId -CertValue $keyValue -StartDate $PfxCert.NotBefore -EndDate $PfxCert.NotAfter -Verbose
+
+    $existingAzADServicePrincipals = Get-AzADServicePrincipal -DisplayName $aaAccountName -ErrorAction SilentlyContinue
+    if ($existingAzADServicePrincipals.Count -gt 0) {
+        foreach ($existingAzADServicePrincipal in $existingAzADServicePrincipals) {
+            Write-Warning "You are about to delete an service principal which may be associated with one or more Azure resources"
+            Remove-AzADServicePrincipal -ObjectId $existingAzADServicePrincipal.ObjectId -Force -Verbose
+        }
     }
 
-    # Requires Application administrator or GLOBAL ADMIN
-    switch ((Get-AzADServicePrincipal -DisplayNameBeginsWith $aaAccountName -ErrorAction SilentlyContinue).Count) {
-        { $PSItem -gt 0 } {
-            $existingAzADServicePrincipals = Get-AzADServicePrincipal -DisplayName $aaAccountName -ErrorAction SilentlyContinue
-            foreach ($existingAzADServicePrincipal in $existingAzADServicePrincipals) {
-                Write-Warning "You are about to delete an service principal which may be associated with one or more Azure resources"
-                Remove-AzADServicePrincipal -ObjectId $existingAzADServicePrincipal.ObjectId -Force -Verbose
-            }
-            Write-Verbose "Creating service principal object"
-            New-AzADServicePrincipal -ApplicationId $Application.ApplicationId -OutVariable ServicePrincipal -StartDate $PfxCert.NotBefore -EndDate $PfxCert.NotAfter -Verbose
-        }
-        Default { 
-            Write-Verbose "Creating service principal object"
-            New-AzADServicePrincipal -ApplicationId $Application.ApplicationId -OutVariable ServicePrincipal -StartDate $PfxCert.NotBefore -EndDate $PfxCert.NotAfter -Verbose 
-        }
-    }
+    Write-Verbose "Creating service principal object"
+    New-AzADServicePrincipal -ApplicationId $Application.ApplicationId -OutVariable ServicePrincipal -StartDate $PfxCert.NotBefore -EndDate $PfxCert.NotAfter -Verbose 
 
     # Grant the DeviceManagementApps.ReadWrite.All role to the service principal
     #*#*#* WIP #*#*#*
@@ -108,16 +89,9 @@ function CreateServicePrincipal {
         $Retries++
     }
     return $Application.ApplicationId.ToString()
-}
+} # End function CreateServicePrincipal
 
 function New-AzAutomationRunAsAccount {
-    # Create a self signed certificate
-    $Cert = New-SelfSignedCertificate -DnsName $certificateName -CertStoreLocation $certStore -KeyExportPolicy Exportable -Provider "Microsoft Enhanced RSA and AES Cryptographic Provider" -NotAfter (Get-Date).AddMonths($selfSignedCertNoOfMonthsUntilExpired) -HashAlgorithm SHA256 -Verbose
-    Export-PfxCertificate -Cert $(Join-Path $certStore $Cert.Thumbprint) -FilePath $PfxCertPathForRunAsAccount -Password $certPWGlobal -Force -Verbose
-    Export-Certificate -Cert $(Join-Path $certStore $Cert.Thumbprint) -FilePath $CerCertPathForRunAsAccount -Type CERT -Verbose
-    Remove-Item -Path $(Join-Path $certStore $Cert.Thumbprint) -Verbose
-    $PfxCert = New-Object -TypeName System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList @($PfxCertPathForRunAsAccount, $certPWGlobal)
-
     # Create a service principal
     switch ((Get-AzADApplication -DisplayName $aaAccountName).Count) {
         { $PSItem -gt 0 } {
@@ -150,7 +124,7 @@ function New-AzAutomationRunAsAccount {
     Remove-Item $CerCertPathForRunAsAccount
 
     return $ApplicationId
-}
+} # End function New-AzAutomationRunAsAccount
 
 function CreateUploadScript {
     $scriptBody = "
@@ -167,7 +141,7 @@ if (!(Test-Path `"$ApplicationName.ipa`") -or (!(Test-Path `"$ApplicationName.ip
 Get-ChildItem -Filter `"$ApplicationName.*`" | ForEach-Object { Set-AzStorageBlobContent -File `$PSItem -Container `$(`$storacctContainer.Name) -Context `$storageContext -Force -BlobType Block }
 "
     return $scriptBody.Trim()
-} 
+} # End function CreateUploadScript
 #endregion Functions
 
 #region Main body
@@ -186,26 +160,26 @@ $presetsSpecific = @{
 }
 
 $presetsGeneral = @{
-    AzResourceProviders                  = @("Microsoft.EventGrid")
-    ModulesList                          = @("Az.Accounts", "Az.Automation", "Az.Storage", "AzureAD", "Microsoft.Graph.Intune")
-    aaModulesList                        = @("AzureAD", "Microsoft.Graph.Intune")
-    transcriptPath                       = ".\NewMobileAppWorkstream.$ApplicationName.log"
-    resourceGroupName                    = $("rg", $ApplicationName.ToLower() -join $null)
-    storacctName                         = $("sa", $ApplicationName.ToLower() -join $null)
-    storacctBlobName                     = $("blob", $ApplicationName.ToLower() -join $null)
-    aaAccountName                        = $("aa", $ApplicationName.ToLower() -join $null)
-    eventGridSubscriptionName            = $("es", $ApplicationName.ToLower() -join $null)
-    keyVaultName                         = $("kv", $ApplicationName.ToLower() -join $null)
-    aaRunbookName                        = $("Publish", $ApplicationName.ToLower() -join "_")
-    aaRunbookWebhookName                 = "ExecutePipeline"
-    CertificateAssetName                 = "AzureRunAsCertificate"
-    ConnectionAssetName                  = "AzureRunAsConnection"
-    ConnectionTypeName                   = "AzureServicePrincipal"
-    certStore                            = "cert:\LocalMachine\My"
-    selfSignedCertNoOfMonthsUntilExpired = 36
-    CertificateName                      = $($aaAccountName, $CertificateAssetName -join $null)
-    PfxCertPathForRunAsAccount           = $(Join-Path $env:TEMP ($CertificateName + ".pfx"))
-    CerCertPathForRunAsAccount           = $(Join-Path $env:TEMP ($CertificateName + ".cer"))
+    AzResourceProviders        = @("Microsoft.EventGrid")
+    ModulesList                = @("Az.Accounts", "Az.Automation", "Az.Storage", "AzureAD", "Microsoft.Graph.Intune")
+    aaModulesList              = @("AzureAD", "Microsoft.Graph.Intune")
+    transcriptPath             = ".\NewMobileAppWorkstream.$ApplicationName.log"
+    resourceGroupName          = $("rg", $ApplicationName.ToLower() -join $null)
+    storacctName               = $("sa", $ApplicationName.ToLower() -join $null)
+    storacctBlobName           = $("blob", $ApplicationName.ToLower() -join $null)
+    aaAccountName              = $("aa", $ApplicationName.ToLower() -join $null)
+    eventGridSubscriptionName  = $("es", $ApplicationName.ToLower() -join $null)
+    keyVaultName               = $("kv", $ApplicationName.ToLower() -join $null)
+    aaRunbookName              = $("Publish", $ApplicationName.ToLower() -join "_")
+    aaRunbookWebhookName       = "ExecutePipeline"
+    CertificateAssetName       = "AzureRunAsCertificate"
+    ConnectionAssetName        = "AzureRunAsConnection"
+    ConnectionTypeName         = "AzureServicePrincipal"
+    certStore                  = "cert:\LocalMachine\My"
+    applicationLifecycle       = 36
+    CertificateName            = $($aaAccountName, $CertificateAssetName -join $null)
+    PfxCertPathForRunAsAccount = $(Join-Path $env:TEMP ($CertificateName + ".pfx"))
+    CerCertPathForRunAsAccount = $(Join-Path $env:TEMP ($CertificateName + ".cer"))
 }
 
 foreach ($presetSpecific in $presetsSpecific.GetEnumerator()) {
@@ -224,13 +198,26 @@ if (Test-Path $transcriptPath) {
 Start-Transcript -Path $transcriptPath -Verbose
 
 # Generate passwords for certificate and client secret
-$certPWGlobal = Get-RandomPassword -AsSecureString
-$ClientSecret = Get-RandomPassword -AsSecureString
-
-
+$certPWGlobal = Get-RandomPassword
+$ClientSecret = Get-RandomPassword
 
 # Prepare the PowerShell runspace
 $ModulesList | ForEach-Object { Import-Module $PSItem }
+
+# Define the lifecycle boundaries for all time bound resources
+$resourceBeginDate = [datetime]::Now
+$resourceEndDate = [datetime]::Now.AddMonths($applicationLifecycle)
+
+# Create a self signed certificate
+$Cert = New-SelfSignedCertificate -DnsName $certificateName -CertStoreLocation $certStore -KeyExportPolicy Exportable -Provider "Microsoft Enhanced RSA and AES Cryptographic Provider" -NotAfter (Get-Date).AddMonths($applicationLifecycle) -HashAlgorithm SHA256 -Verbose
+Export-PfxCertificate -Cert $(Join-Path $certStore $Cert.Thumbprint) -FilePath $PfxCertPathForRunAsAccount -Password $certPWGlobal -Force -Verbose
+Export-Certificate -Cert $(Join-Path $certStore $Cert.Thumbprint) -FilePath $CerCertPathForRunAsAccount -Type CERT -Verbose
+Remove-Item -Path $(Join-Path $certStore $Cert.Thumbprint) -Verbose
+$PfxCert = New-Object -TypeName System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList @($PfxCertPathForRunAsAccount, $certPWGlobal)
+
+#region Create the Upload script file (Upload-FileToAzBlob.ps1)
+Add-Content -Path .\Upload-FileToAzBlob.ps1 -Value $(CreateUploadScript) -Force
+#endregion Create the Upload script file (Upload-FileToAzBlob.ps1)
 
 # Authenticate to Azure
 if (((Get-AzContext).Subscription.Id -ne $subscriptionID) -or (Get-AzContext).Tenant.Id -ne $tenantID) {
@@ -255,13 +242,13 @@ New-AzResourceGroupDeployment -ResourceGroupName $("rg", $ApplicationName -join 
 $ApplicationServicePrincipal = New-AzAutomationRunAsAccount
 
 # Enter ClientSecret into KeyVault and set policy for service principal to access it
-Set-AzKeyVaultSecret -VaultName $keyVaultName -Name "SPClientSecret" -SecretValue $ClientSecret -Expires ([datetime]::Now.AddMonths($selfSignedCertNoOfMonthsUntilExpired)) -NotBefore ([datetime]::Now) -Verbose
-Set-AzKeyVaultAccessPolicy -VaultName $keyVaultName -ResourceGroupName $resourceGroupName -ServicePrincipalName $aaAccountName -PermissionsToSecrets @("Get","List") -Verbose 
+Set-AzKeyVaultSecret -VaultName $keyVaultName -Name "SPClientSecret" -SecretValue $ClientSecret -Expires $resourceEndDate -NotBefore $resourceBeginDate -Verbose
+Set-AzKeyVaultAccessPolicy -VaultName $keyVaultName -ResourceGroupName $resourceGroupName -ServicePrincipalName $aaAccountName -PermissionsToSecrets @("Get", "List") -Verbose 
 
 #region Prepare the storage account
 $storageContext = (Get-AzStorageAccount -ResourceGroupName $resourceGroupName -Name $storacctName).Context
 New-AzStorageContainer -Name $storacctBlobName -Context $storageContext -OutVariable storacctContainer -Verbose
-New-AzStorageContainerStoredAccessPolicy -Context $storageContext -Container $storacctBlobName -Policy "$aaAccountName Policy" -Permission @("Read","List","Delete") -StartTime ([datetime]::Now) -ExpiryTime ([datetime]::Now.AddMonths($selfSignedCertNoOfMonthsUntilExpired)) -Verbose
+New-AzStorageContainerStoredAccessPolicy -Context $storageContext -Container $storacctBlobName -Policy "$aaAccountName Policy" -Permission @("Read", "List", "Delete") -StartTime $resourceBeginDate -ExpiryTime $resourceEndDate -Verbose
 #endregion Prepare the storage account
 
 #region Prepare the event grid
@@ -270,7 +257,7 @@ New-AzEventGridSubscription -ResourceId $(Get-AzResource -ResourceGroupName $res
 
 #region Prepare the automation account
 Import-AzAutomationRunbook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Path ".\Publish-Lob.Runbook.ps1" -Type PowerShell -Name $aaRunbookName -Description "Publishing pipeline" -Published
-$aaRunbookWebhook = New-AzAutomationWebhook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $aaRunbookWebhookName -RunbookName $aaRunbookName -IsEnabled $true -ExpiryTime ([datetime]::Now).AddYears(3) -confirm:$false
+$aaRunbookWebhook = New-AzAutomationWebhook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $aaRunbookWebhookName -RunbookName $aaRunbookName -IsEnabled $true -ExpiryTime $resourceEndDate -confirm:$false
 $automationVariables = @{
     "ApplicationID"      = $ApplicationServicePrincipal.ApplicationId
     #"LOBType"            = "microsoft.graph.iosLOBApp"
@@ -284,13 +271,11 @@ $automationVariables.GetEnumerator().ForEach({ New-AzAutomationVariable -Resourc
 #region Prepare the automation runbook
 Write-Verbose "Updating Azure modules on Automation Account"
 Write-Warning "Allowing time for module import to process; please be patient"
-$aaModulesRemoveList = $(Get-AzAutomationModule -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName) | Where-Object {$PSItem.Name -like "Azure*"} | Select-Object -Property Name
+$aaModulesRemoveList = $(Get-AzAutomationModule -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName) | Where-Object { $PSItem.Name -like "Azure*" } | Select-Object -Property Name
 $aaModulesRemoveList | ForEach-Object { Remove-AzAutomationModule -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $PSItem -Force -ErrorAction SilentlyContinue }
 $aaModulesList | ForEach-Object { Import-ModulesFromPSGalleryToModuleShare $PSItem }
 #endregion Prepare the automation runbook
 
-#region Create the Upload script file (Upload-FileToAzBlob.ps1)
-Add-Content -Path .\Upload-FileToAzBlob.ps1 -Value $(CreateUploadScript) -Force
-#endregion Create the Upload script file (Upload-FileToAzBlob.ps1)
+
 
 Stop-Transcript -Verbose
