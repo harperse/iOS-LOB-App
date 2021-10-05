@@ -177,38 +177,52 @@ Clear-Host
 $Error.Clear()
 $script:ConfirmPreference = [System.Management.Automation.ConfirmImpact]::None
 
-New-Variable -Name "tenantName" -Value "azinwcb089outlook.onmicrosoft.com" -Force
-New-Variable -Name "tenantID" -Value "40116f04-90e9-4f3d-a895-152754654561" -Force
-New-Variable -Name "subscriptionName" -Value "ES-CE-CUS-EXT-seharper" -Force
-New-Variable -Name "subscriptionID" -Value "709272e4-8b76-40d9-9a8a-00731f51eb83" -Force
-New-Variable -Name "location" -Value "eastus" -Force
-New-Variable -Name "azureEnvironment" -Value "AzureCloud" -Force
+$presetsSpecific = @{
+    tenantName       = "azinwcb089outlook.onmicrosoft.com"
+    tenantID         = "40116f04-90e9-4f3d-a895-152754654561"
+    subscriptionName = "ES-CE-CUS-EXT-seharper"
+    subscriptionID   = "709272e4-8b76-40d9-9a8a-00731f51eb83"
+    location         = "eastus"
+    azureEnvironment = "AzureCloud"
+}
 
-New-Variable -Name "resourceGroupName" -Value $("rg", $ApplicationName.ToLower() -join $null) -Force
-New-Variable -Name "storacctName" -Value $("sa", $ApplicationName.ToLower() -join $null) -Force
-New-Variable -Name "storacctBlobName" -Value $("blob", $ApplicationName.ToLower() -join $null) -Force
-New-Variable -Name "aaAccountName" -Value $("aa", $ApplicationName.ToLower() -join $null) -Force
-New-Variable -Name "eventGridSubscriptionName" -Value $("es", $ApplicationName.ToLower() -join $null) -Force
+$presetsGeneral = @{
+    AzResourceProviders                  = @("Microsoft.EventGrid")
+    ModulesList                          = @("Az.Accounts", "Az.Automation", "Az.Storage", "AzureAD", "Microsoft.Graph.Intune")
+    aaModulesList                        = @("Az.Accounts", "AzureAD", "Microsoft.Graph.Intune", "Az.Automation", "Az.Storage")
+    aaModulesRemoveList                  = @("Azure", "Azure.Storage", "AzureRM.Automation", "AzureRM.Compute", "AzureRM.Profile", "AzureRM.Resources", "AzureRM.SQL", "AzureRM.Storage")
+    transcriptPath                       = ".\NewMobileAppWorkstream.$ApplicationName.log"
+    resourceGroupName                    = $("rg", $ApplicationName.ToLower() -join $null)
+    storacctName                         = $("sa", $ApplicationName.ToLower() -join $null)
+    storacctBlobName                     = $("blob", $ApplicationName.ToLower() -join $null)
+    aaAccountName                        = $("aa", $ApplicationName.ToLower() -join $null)
+    eventGridSubscriptionName            = $("es", $ApplicationName.ToLower() -join $null)
+    keyVaultName                         = $("kv", $ApplicationName.ToLower() -join $null)
+    aaRunbookName                        = $("Publish", $ApplicationName.ToLower() -join "_")
+    aaRunbookWebhookName                 = "ExecutePipeline"
+    CertificateAssetName                 = "AzureRunAsCertificate"
+    ConnectionAssetName                  = "AzureRunAsConnection"
+    ConnectionTypeName                   = "AzureServicePrincipal"
+    certStore                            = "cert:\LocalMachine\My"
+    selfSignedCertNoOfMonthsUntilExpired = 36
+    CertificateName                      = $($aaAccountName, $CertificateAssetName -join $null)
+    PfxCertPathForRunAsAccount           = $(Join-Path $env:TEMP ($CertificateName + ".pfx"))
+    CerCertPathForRunAsAccount           = $(Join-Path $env:TEMP ($CertificateName + ".cer"))
+}
 
-New-Variable -Name "aaRunbookName" -Value $("Publish", $ApplicationName.ToLower() -join "_") -Force
-New-Variable -Name "aaRunbookWebhookName" -Value "ExecutePipeline" -Force
-New-Variable -Name "CertificateAssetName" -Value  "AzureRunAsCertificate" -Force
-New-Variable -Name "ConnectionAssetName" -Value  "AzureRunAsConnection" -Force
-New-Variable -Name "ConnectionTypeName" -Value  "AzureServicePrincipal" -Force
-New-Variable -Name "certStore" -Value "cert:\LocalMachine\My" -Force
-New-Variable -Name "selfSignedCertNoOfMonthsUntilExpired" -Value 36 -Force
-New-Variable -Name "CertificateName" -Value $($aaAccountName, $CertificateAssetName -join $null) -Force
-New-Variable -Name "PfxCertPathForRunAsAccount" -Value $(Join-Path $env:TEMP ($CertificateName + ".pfx")) -Force
-New-Variable -Name "CerCertPathForRunAsAccount" -Value $(Join-Path $env:TEMP ($CertificateName + ".cer")) -Force
+foreach ($presetSpecific in $presetsSpecific.GetEnumerator()) {
+    New-Variable -Name $presetSpecific.Key -Value $presetSpecific.Value -Force -Verbose
+}
 
-$transcriptPath = ".\NewMobileAppWorkstream.$ApplicationName.log"
+foreach ($presetGeneral in $presetsGeneral.GetEnumerator()) {
+    New-Variable -Name $presetGeneral.Key -Value $presetGeneral.Value -Force -Verbose
+}
+
 if (Test-Path $transcriptPath) {
-    Remove-Item $transcriptPath
+    Remove-Item $transcriptPath -Force -Verbose
 }
 Start-Transcript -Path $transcriptPath -Verbose
 
-[string[]]$AzResourceProviders = @("Microsoft.EventGrid")
-[string[]]$ModulesList = @("Az.Accounts", "Az.Automation", "Az.Storage", "AzureAD", "Microsoft.Graph.Intune")
 $certPWGlobal = Get-RandomPassword -AsSecureString
 $ClientSecret = Get-RandomPassword -AsSecureString
 
@@ -222,43 +236,34 @@ if (((Get-AzContext).Subscription.Id -ne $subscriptionID) -or (Get-AzContext).Te
 Connect-AzureAD -AzureEnvironmentName $azureEnvironment -TenantId $tenantID
 
 # Prepare the Azure subscription
-foreach ($AzResourceProvider in $AzResourceProviders) {
-    if ((Get-AzResourceProvider -ProviderNamespace $AzResourceProvider).RegistrationState -ne "Registered") {
-        Register-AzResourceProvider -ProviderNamespace $AzResourceProvider
-    }
-}
+Register-AzResourceProvider -ProviderNamespace $AzResourceProvider
 
 # Build the required resources using JSON template and parameters files
-# Uncomment when testing second app
-(Get-Content .\parameters.json).Replace("IOSLOBAPPNAME", $ApplicationName.ToLower()) | Set-Content .\parameters.$ApplicationName.json -Force
+(Get-Content .\parameters.json).Replace("IOSLOBAPPNAME", $ApplicationName.ToLower()).Replace("TENANTIDREPLACE",$tenantID) | Set-Content .\parameters.$ApplicationName.json -Force
 if ($null -ne $(Get-AzResourceGroup -Name $("rg", $ApplicationName -join $null) -Location $location -ErrorAction SilentlyContinue)) {
     Write-Error "Duplicate Azure Resource Group detected.  Exiting script"; Exit
 }
 New-AzResourceGroup -Name $("rg", $ApplicationName -join $null) -Location $location
 New-AzResourceGroupDeployment -ResourceGroupName $("rg", $ApplicationName -join $null) -Mode Complete -Name "Deployment_$ApplicationName" -TemplateFile .\template.json -TemplateParameterFile .\parameters.$ApplicationName.json
-#
 
+# Creating the service principal and all of its moving parts
 $ApplicationServicePrincipal = New-AzAutomationRunAsAccount
-#endregion Main body
 
 #region Prepare the storage account
 ### Rights for application/service principal to storage account, or use storageaccount keys?
 $storageContext = (Get-AzStorageAccount -ResourceGroupName $resourceGroupName -Name $storacctName).Context
-if (!$(Get-AzStorageContainer -Context $storageContext -Name $storacctBlobName -ErrorAction SilentlyContinue).Name -contains $storacctBlobName) {
-    New-AzStorageContainer -Name $storacctBlobName -Context $storageContext -OutVariable storacctContainer -Verbose
-}
-$storageAccountKeys = Get-AzStorageAccountKey -ResourceGroupName $resourceGroupName -Name $storacctName -ListKerbKey
+New-AzStorageContainer -Name $storacctBlobName -Context $storageContext -OutVariable storacctContainer -Verbose
 #endregion Prepare the storage account
 
 #region Prepare the automation account
 Import-AzAutomationRunbook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Path ".\Publish-Lob.Runbook.ps1" -Type PowerShell -Name $aaRunbookName -Description "Publishing pipeline" -Published
 $aaRunbookWebhook = New-AzAutomationWebhook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $aaRunbookWebhookName -RunbookName $aaRunbookName -IsEnabled $true -ExpiryTime ([datetime]::Now).AddYears(3) -confirm:$false
 $automationVariables = @{
-    "StorageAccountKey1" = $storageAccountKeys[0].Value
-    "StorageAccountKey2" = $storageAccountKeys[1].Value
+    #"StorageAccountKey1" = $storageAccountKeys[0].Value
+    #"StorageAccountKey2" = $storageAccountKeys[1].Value
     "ApplicationID"      = $ApplicationServicePrincipal.ApplicationId
-    "LOBType"            = "microsoft.graph.iosLOBApp"
-    "CloudBlobContainer" = $("blob", $ApplicationName.ToLower() -join $null)
+    #"LOBType"            = "microsoft.graph.iosLOBApp"
+    "CloudBlobContainer" = $storacctBlobName
     "ApplicationName"    = $ApplicationName
     "ClientSecret"       = $([System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ClientSecret)))
 }
@@ -270,11 +275,7 @@ $automationVariables.GetEnumerator().ForEach({ New-AzAutomationVariable -Resourc
 New-AzEventGridSubscription -ResourceId $(Get-AzResource -ResourceGroupName $resourceGroupName -Name $storacctName).ResourceId -EventSubscriptionName $eventGridSubscriptionName -Endpoint $aaRunbookWebhook.WebhookURI -EndpointType webhook -IncludedEventType @("Microsoft.Storage.BlobCreated") -AdvancedFilter @{operator = "StringEndsWith"; key = "Subject"; Values = @(".ps1") }
 #endregion Prepare the event grid
 
-
 #region Prepare the automation runbook
-# Uncomment when testing second app
-$aaModulesList = @("Az.Accounts", "AzureAD", "Microsoft.Graph.Intune", "Az.Automation", "Az.Storage")
-$aaModulesRemoveList = @("Azure", "Azure.Storage", "AzureRM.Automation", "AzureRM.Compute", "AzureRM.Profile", "AzureRM.Resources", "AzureRM.SQL", "AzureRM.Storage")
 Write-Verbose "Updating Azure modules on Automation Account"
 Write-Warning "Allowing time for module import to process; please be patient"
 $aaModulesList | ForEach-Object { Import-ModulesFromPSGalleryToModuleShare $PSItem }
@@ -286,12 +287,3 @@ Add-Content -Path .\Upload-FileToAzBlob.ps1 -Value $(CreateUploadScript) -Force
 #endregion Create the Upload script file (Upload-FileToAzBlob.ps1)
 
 Stop-Transcript -Verbose
-
-# force in RG deployment line, removing application line, webhook line
-# No -EndDate for application?
-# DisplayName defaulting to azure-powershell-????
-
-# RBAC
-# Azure AD role assignments
-# ApplicationID to AutomationVariable
-# LOBType to AutomationVariable
