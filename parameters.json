@@ -17,8 +17,14 @@
         "keyVault_name": {
             "value": "kvIOSLOBAPPNAME"
         },
-        "tenantId": {
-            "value": "TENANTIDREPLACE"
+        "applicationId": {
+            "value": "APPLICATIONIDREPLACE"
+        },
+        "appObjectId": {
+            "value": "APPOBJECTIDREPLACE"
+        },
+        "adminObjectId": {
+            "value": "ADMINOBJECTIDREPLACE"
         },
         "location": {
             "value": "eastus"

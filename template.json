@@ -9,12 +9,6 @@
                 "description": "Azure location for the resources"
             }
         },
-        "tenantId": {
-            "type": "string",
-            "metadata": {
-                "description": "Tenant ID of the base tenant associated with the subscription where the key vault exists"
-            }
-        },
         "automationAccounts_name": {
             "type": "string",
             "metadata": {
@@ -44,6 +38,31 @@
             "metadata": {
                 "description": "Event Grid system topic name"
             }
+        },
+        "applicationId": {
+            "type": "string",
+            "metadata": {
+                "description": "Application ID from Azure AD Application"
+            }
+        },
+        "appObjectId": {
+            "type": "string",
+            "metadata": {
+                "description": "Object ID from Azure AD Application"
+            }
+        },
+        "adminObjectId": {
+            "type": "string",
+            "metadata": {
+                "description": "Object ID of the current user executing the script"
+            }
+        },
+        "tenantId": {
+            "type": "string",
+            "metadata": {
+                "description": "description"
+            },
+            "defaultValue": "[subscription().tenantId]"
         }
     },
     "resources": [
@@ -75,6 +94,23 @@
                     "name": "standard",
                     "family": "A"
                 },
+                "accessPolicies": [
+                    {
+                        "objectId": "[parameters('appObjectId')]",
+                        "applicationId": "[parameters('applicationId')]",
+                        "tenantId": "[parameters('tenantId')]",
+                        "permissions": {
+                            "secrets": [ "get", "list" ]
+                        }
+                    },
+                    {
+                        "objectId": "[parameters('adminObjectId')]",
+                        "tenantId": "[parameters('tenantId')]",
+                        "permissions": {
+                            "secrets": [ "get", "set", "list", "delete", "backup", "delete", "recover", "purge" ]
+                        }
+                    }
+                ],
                 "tenantId": "[parameters('tenantId')]"
             }
         },

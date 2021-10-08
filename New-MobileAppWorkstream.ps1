@@ -65,7 +65,7 @@ function New-LOBAzADApplication {
 function New-LOBAzADAppCredential {
     [CmdletBinding()]
     param (
-        [Parameter()][Microsoft.Azure.Commands.ActiveDirectory.PSADApplication]$Application
+        [Parameter()]$Application
     )
 
     $keyValue = [System.Convert]::ToBase64String($PfxCert.GetRawCertData())
@@ -83,7 +83,7 @@ function New-LOBAzADAppCredential {
 function New-LOBAzADServicePrincipal {
     [CmdletBinding()]
     param (
-        [Parameter()][Microsoft.Azure.Commands.ActiveDirectory.PSADApplication]$Application
+        [Parameter()]$Application
     )
 
     # Create the AzADServicePrincipal
@@ -102,9 +102,9 @@ function New-LOBAzADServicePrincipal {
 
 function CreateServicePrincipal {
     # Requires Application administrator or GLOBAL ADMIN  
-    $lobApplicationObject = New-LOBAzADApplication
-    $lobAppCredentialObject = New-LOBAzADAppCredential -Application $lobApplicationObject
-    $lobAppServicePrincipal = New-LOBAzADServicePrincipal -Application $lobApplicationObject
+    New-LOBAzADApplication -OutVariable lobApplicationObject
+    New-LOBAzADAppCredential -Application $lobApplicationObject -OutVariable lobAppCredentialObject
+    New-LOBAzADServicePrincipal -Application $lobApplicationObject -OutVariable lobAppServicePrincipal
     
     # Sleep here for a few seconds to allow the service principal application to become active (ordinarily takes a few seconds)
     Write-Verbose "Pausing to allow the service principal application to become active"
@@ -113,12 +113,12 @@ function CreateServicePrincipal {
     # Grant the DeviceManagementApps.ReadWrite.All role to the service principal
     # Requires User Access Administrator or Owner
     $requiredResourceAccess = New-Object "Microsoft.Open.AzureAD.Model.RequiredResourceAccess"
-    $requiredResourceAccess.ResourceAppId = $(Get-AzADServicePrincipal -ApplicationId $Application.ApplicationId).ApplicationId
+    $requiredResourceAccess.ResourceAppId = $(Get-AzADServicePrincipal -ApplicationId $lobAppServicePrincipal.ApplicationId).ApplicationId
     $requiredResourceAccess.ResourceAccess = $(New-Object "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList @("78145de6-330d-4800-a6ce-494ff2d33d07", "Role"))
-    Set-AzureADApplication -ObjectId $lobAppServicePrincipal.ObjectId -RequiredResourceAccess $requiredResourceAccess
+    Set-AzureADApplication -ObjectId $lobApplicationObject.ObjectId -RequiredResourceAccess $requiredResourceAccess
 
     # Requires User Access Administrator or Owner
-    New-AzRoleAssignment -RoleDefinitionName Contributor -ServicePrincipalName $Application.ApplicationId -ErrorAction SilentlyContinue -Verbose
+    New-AzRoleAssignment -RoleDefinitionName Contributor -ServicePrincipalName $lobApplicationObject.ApplicationId -ErrorAction SilentlyContinue -Verbose
     do {
         Write-Verbose "Waiting for role assignment to be effective"
         Start-Sleep -Seconds 15
@@ -188,18 +188,16 @@ foreach ($presetConstructed in $presetsConstructed.GetEnumerator()) {
     New-Variable -Name $presetConstructed.Key -Value $presetConstructed.Value -Force -Verbose
 }
 
+# Start the session transcript
+if (Test-Path $transcriptPath) { 
+    Remove-Item $transcriptPath -Force -Verbose 
+}
+Start-Transcript -Path $transcriptPath -Verbose
+
 # Variables constructed from the constructed presets :)
 $certificateName = $($aaAccountName, $CertificateAssetName -join $null)
 $PfxCertPathForRunAsAccount = $(Join-Path $env:TEMP ($CertificateName + ".pfx"))
 $CerCertPathForRunAsAccount = $(Join-Path $env:TEMP ($CertificateName + ".cer"))
-
-
-if (Test-Path $transcriptPath) { 
-    Remove-Item $transcriptPath -Force -Verbose 
-}
-
-# Start the session transcript
-Start-Transcript -Path $transcriptPath -Verbose
 
 # Generate passwords for certificate and client secret
 $certPWGlobal = Get-RandomPassword
@@ -229,21 +227,21 @@ if (((Get-AzContext).Subscription.Id -ne $subscriptionID) -or (Get-AzContext).Te
 }
 Connect-AzureAD -AzureEnvironmentName $azureEnvironment -TenantId $tenantID -Verbose
 
+# Creating the service principal and all of its moving parts
+$ApplicationServicePrincipal = CreateServicePrincipal
+
 # Prepare the Azure subscription
 Register-AzResourceProvider -ProviderNamespace "Microsoft.EventGrid" -Verbose
 
 # Build the required resources using JSON template and parameters files
-(Get-Content .\parameters.json).Replace("IOSLOBAPPNAME", $ApplicationName.ToLower()).Replace("TENANTIDREPLACE", $tenantID) | Set-Content .\parameters.$ApplicationName.json -Force -Verbose
+(Get-Content .\parameters.json).Replace("IOSLOBAPPNAME", $ApplicationName.ToLower()).Replace("APPOBJECTIDREPLACE", $ApplicationServicePrincipal.objectID).Replace("APPLICATIONIDREPLACE", $ApplicationServicePrincipal.ApplicationId).Replace("ADMINOBJECTIDREPLACE", $((Get-AzContext).Account.ExtendedProperties.HomeAccountId.Split(".")[0])) | Set-Content .\parameters.$ApplicationName.json -Force -Verbose
 
 # Create the resource group; NOTE: The script will stop if a duplicate resource name is detected
-if ($null -ne $(Get-AzResourceGroup -Name $("rg", $ApplicationName -join $null) -Location $location -ErrorAction SilentlyContinue)) {
+if ($null -ne $(Get-AzResourceGroup -Name $resourceGroupName -Location $location -ErrorAction SilentlyContinue)) {
     Write-Error "Duplicate Azure Resource Group detected.  Exiting script"; Exit
 }
-New-AzResourceGroup -Name $("rg", $ApplicationName -join $null) -Location $location
-New-AzResourceGroupDeployment -ResourceGroupName $("rg", $ApplicationName -join $null) -Mode Complete -Name "Deployment_$ApplicationName" -TemplateFile .\template.json -TemplateParameterFile .\parameters.$ApplicationName.json
-
-# Creating the service principal and all of its moving parts
-$ApplicationServicePrincipal = CreateServicePrincipal
+New-AzResourceGroup -Name $resourceGroupName -Location $location
+New-AzResourceGroupDeployment -ResourceGroupName $resourceGroupName -Mode Complete -Name "Deployment_$ApplicationName" -TemplateFile .\template.json -TemplateParameterFile .\parameters.$ApplicationName.json
 
 # Enter ClientSecret into KeyVault and set policy for service principal to access it
 Set-AzKeyVaultSecret -VaultName $keyVaultName -Name "SPClientSecret" -SecretValue $ClientSecret -Expires $resourceEndDate -NotBefore $resourceBeginDate -Verbose
