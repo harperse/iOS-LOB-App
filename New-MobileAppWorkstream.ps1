@@ -167,10 +167,11 @@ $presetsSpecific = @{
     ConnectionTypeName   = "AzureServicePrincipal"
     certStore            = "cert:\LocalMachine\My"
     applicationLifecycle = 36
+    uploadScriptName = "Upload-FileToAzBlob.ps1"
 }
 
 $presetsConstructed = @{
-    transcriptPath            = ".\NewMobileAppWorkstream.$ApplicationName.log"
+    transcriptPath            = ".\NewMobileAppWorkstream.$ApplicationName.$([datetime]::Now.GetDateTimeFormats()[5]).log"
     resourceGroupName         = $("rg", $ApplicationName.ToLower() -join $null)
     storacctName              = $("sa", $ApplicationName.ToLower() -join $null)
     storacctBlobName          = $("blob", $ApplicationName.ToLower() -join $null)
@@ -218,7 +219,10 @@ Remove-Item -Path $(Join-Path $certStore $Cert.Thumbprint) -Verbose
 $PfxCert = New-Object -TypeName System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList @($PfxCertPathForRunAsAccount, $certPWGlobal)
 
 #region Create the Upload script file (Upload-FileToAzBlob.ps1)
-Add-Content -Path .\Upload-FileToAzBlob.ps1 -Value $(CreateUploadScript) -Force
+if (Test-Path .\$uploadScriptName) {
+    Remove-Item -Path .\Upload-FileToAzBlob.ps1
+}
+Add-Content -Path .\$uploadScriptName -Value $(CreateUploadScript) -Force
 #endregion Create the Upload script file (Upload-FileToAzBlob.ps1)
 
 # Authenticate to Azure
@@ -234,7 +238,12 @@ $ApplicationServicePrincipal = CreateServicePrincipal
 Register-AzResourceProvider -ProviderNamespace "Microsoft.EventGrid" -Verbose
 
 # Build the required resources using JSON template and parameters files
-(Get-Content .\parameters.json).Replace("IOSLOBAPPNAME", $ApplicationName.ToLower()).Replace("APPOBJECTIDREPLACE", $ApplicationServicePrincipal.objectID).Replace("APPLICATIONIDREPLACE", $ApplicationServicePrincipal.ApplicationId).Replace("ADMINOBJECTIDREPLACE", $((Get-AzContext).Account.ExtendedProperties.HomeAccountId.Split(".")[0])) | Set-Content .\parameters.$ApplicationName.json -Force -Verbose
+$paramsFile = Get-Content .\parameters.json
+$paramsFile = $paramsFile.Replace("IOSLOBAPPNAME", $ApplicationName.ToLower())
+$paramsFile = $paramsFile.Replace('APPOBJECTIDREPLACE', $ApplicationServicePrincipal.objectID[0])
+$paramsFile = $paramsFile.Replace('APPLICATIONIDREPLACE', $ApplicationServicePrincipal.ApplicationId[0])
+$paramsFile = $paramsFile.Replace('ADMINOBJECTIDREPLACE', $((Get-AzContext).Account.ExtendedProperties.HomeAccountId.Split(".")[0])) 
+Set-Content .\parameters.$ApplicationName.json -Value $paramsFile -Force -Verbose
 
 # Create the resource group; NOTE: The script will stop if a duplicate resource name is detected
 if ($null -ne $(Get-AzResourceGroup -Name $resourceGroupName -Location $location -ErrorAction SilentlyContinue)) {
@@ -245,11 +254,10 @@ New-AzResourceGroupDeployment -ResourceGroupName $resourceGroupName -Mode Comple
 
 # Enter ClientSecret into KeyVault and set policy for service principal to access it
 Set-AzKeyVaultSecret -VaultName $keyVaultName -Name "SPClientSecret" -SecretValue $ClientSecret -Expires $resourceEndDate -NotBefore $resourceBeginDate -Verbose
-Set-AzKeyVaultAccessPolicy -VaultName $keyVaultName -ResourceGroupName $resourceGroupName -ServicePrincipalName $aaAccountName -PermissionsToSecrets @("Get", "List") -Verbose 
+Set-AzKeyVaultAccessPolicy -VaultName $keyVaultName -ResourceGroupName $resourceGroupName -ServicePrincipalName $((Get-AzADServicePrincipal -DisplayName $aaAccountName).ServicePrincipalNames[0]) -PermissionsToSecrets @("Get", "List") -Verbose 
 
 #region Prepare the storage account
 $storageContext = (Get-AzStorageAccount -ResourceGroupName $resourceGroupName -Name $storacctName).Context
-#New-AzStorageContainer -Name $storacctBlobName -Context $storageContext -OutVariable storacctContainer -Verbose
 New-AzStorageContainerStoredAccessPolicy -Context $storageContext -Container $storacctBlobName -Policy "$aaAccountName Policy" -Permission "rld" -StartTime $resourceBeginDate -ExpiryTime $resourceEndDate -Verbose
 #endregion Prepare the storage account
 
@@ -260,7 +268,7 @@ Write-Verbose "Creating correct automation certificate"
 New-AzAutomationCertificate -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Path $PfxCertPathForRunAsAccount -Name $CertificateAssetName -Password $certPWGlobal -Exportable -Verbose
 
 # Populate the ConnectionFieldValues
-$ConnectionFieldValues = @{"ApplicationId" = $ApplicationServicePrincipal.ApplicationId; "TenantId" = $tenantID; "CertificateThumbprint" = $PfxCert.Thumbprint; "SubscriptionId" = $subscriptionID }
+$ConnectionFieldValues = @{"ApplicationId" = $ApplicationServicePrincipal.ApplicationId[0]; "TenantId" = $tenantID; "CertificateThumbprint" = $PfxCert.Thumbprint; "SubscriptionId" = $subscriptionID }
 
 # Create an Automation connection asset named AzureRunAsConnection in the Automation account. This connection uses the service principal.
 Write-Verbose "Removing default automation connection"
@@ -270,7 +278,7 @@ New-AzAutomationConnection -ResourceGroupName $resourceGroupName -AutomationAcco
 
 # Import the runbook file into the automation account
 Import-AzAutomationRunbook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Path ".\Publish-Lob.Runbook.ps1" -Type PowerShell -Name $aaRunbookName -Description "Publishing pipeline" -Published
-$aaRunbookWebhook = New-AzAutomationWebhook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $aaRunbookWebhookName -RunbookName $aaRunbookName -IsEnabled $true -ExpiryTime $resourceEndDate -confirm:$false
+$aaRunbookWebhook = New-AzAutomationWebhook -ResourceGroupName $resourceGroupName -AutomationAccountName $aaAccountName -Name $aaRunbookWebhookName -RunbookName $aaRunbookName -IsEnabled $true -ExpiryTime $resourceEndDate -Confirm:$false
 $automationVariables = @{
     "ApplicationID"      = $ApplicationServicePrincipal.ApplicationId
     #"LOBType"            = "microsoft.graph.iosLOBApp"

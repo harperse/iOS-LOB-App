@@ -18,4 +18,3 @@ Get-ChildItem -Filter "$ApplicationName.*" | ForEach-Object { Set-AzStorageBlobC
 # Upload the .ipa and .ps1 files
 Set-AzStorageBlobContent -File "$ApplicationName.ipa" -Container $storacctContainer.Name -Context $storageContext -Force -BlobType Block
 Set-AzStorageBlobContent -File "$ApplicationName.ipa.ps1" -Container $storacctContainer.Name -Context $storageContext -Force -BlobType Block
-

@@ -172,7 +172,7 @@ function UploadFileToAzureStorage($sasUri, $bytes) {
         $end = [Math]::Min($start + $chunkSizeInBytes - 1, $bytes.Length - 1)
         $body = $bytes[$start..$end]
 
-        Write-Progress -Activity "Uploading File to Azure Storage" -status "Uploading chunk $($chunk + 1) of $chunks" -percentComplete (($chunk + 1) / $chunks * 100)
+        Write-Progress -Activity "Uploading File to Azure Storage" -Status "Uploading chunk $($chunk + 1) of $chunks" -PercentComplete (($chunk + 1) / $chunks * 100)
         UploadAzureStorageChunk -sasUri $sasUri -id $id -body $body
     }
     Write-Progress -Completed -Activity "Uploading File to Azure Storage"
@@ -299,22 +299,27 @@ function Set-LobApp {
 Disable-AzContextAutosave -Scope Process | Out-Null
 
 # Connect to Azure with Run As account/service principal created for the automation account
+Write-Output "Connecting to Azure"
 $ServicePrincipalConnection = Get-AutomationConnection -Name 'AzureRunAsConnection' -ErrorAction Stop
-Connect-AzAccount -ServicePrincipal -Tenant $ServicePrincipalConnection.TenantId -ApplicationId $ServicePrincipalConnection.ApplicationId -CertificateThumbprint $ServicePrincipalConnection.CertificateThumbprint
-Set-AzContext -SubscriptionId $ServicePrincipalConnection.SubscriptionID -OutVariable AzureContext
+Connect-AzAccount -ServicePrincipal -Tenant $ServicePrincipalConnection.TenantId -ApplicationId $ServicePrincipalConnection.ApplicationId -CertificateThumbprint $ServicePrincipalConnection.CertificateThumbprint -Environment AzureCloud
+Set-AzContext -SubscriptionId $ServicePrincipalConnection.SubscriptionID -Tenant $ServicePrincipalConnection.TenantId -OutVariable AzureContext
 
 # Hydrate the variables
+Write-Output "Hydrating the variables"
 $applicationName = Get-AutomationVariable -Name "ApplicationName"
 $cloudBlobContainer = Get-AutomationVariable -Name "cloudBlobContainer"
-$resourceGroupName = $("rg", $(Get-AutomationVariable -Name "ApplicationName") -join $null)
-$storacctName = $("sa", $(Get-AutomationVariable -Name "ApplicationName").ToLower() -join $null)
+$resourceGroupName = $("rg", $applicationName -join $null)
+$storacctName = $("sa", $applicationName -join $null)
+$keyVaultName = $("kv", $applicationName -join $null)
 
 # Get the files from the storage account
+Write-Output "Getting files from Azure Storage account"
 $storageContext = $(Get-AzStorageAccount -ResourceGroupName $resourceGroupName -Name $storacctName).Context
 Get-AzStorageBlobContent -Context $storageContext -Blob "$ApplicationName.ipa" -Container $cloudBlobContainer -Destination "$pwd\$ApplicationName.ipa" | Out-Null
 Get-AzStorageBlobContent -Context $storageContext -Blob "$ApplicationName.ipa.ps1" -Container $cloudBlobContainer -Destination "$pwd\$ApplicationName.ipa.ps1" | Out-Null
 
 # Verify the download worked, and exit if it did not
+Write-Output "Verifying download from Azure Storage"
 if ((Test-Path "$PWD\$applicationName.ipa") -and (Test-Path "$PWD\$applicationName.ipa.ps1")) {
     Write-Output "Files acquired"
     Remove-AzStorageBlob -Context $storageContext -Blob "$ApplicationName.ipa" -Container $CloudBlobContainer
@@ -328,14 +333,28 @@ else { "Unable to get files from Azure storage"; exit }
 # AppID is the ApplicationId of the Service Principal created in AzureAD for this application
 # The AuthUrl ends with the TenantID of the authenticating tenant
 # The ClientSecret is an application level password specifically created for the service principal tied to the automation account
-Update-MsGraphEnvironment -AppId $ServicePrincipalConnection.ApplicationId -AuthUrl $("https://login.microsoftonline.com", $ServicePrincipalConnection.TenantId -join "/") -Quiet
-Connect-MSGraph -ClientSecret $(Get-AutomationVariable -Name "ClientSecret") -Verbose
+Write-Output "Connecting to MSGraph"
+$SPClientSecret = $(Get-AzKeyVaultSecret -VaultName $keyVaultName -Name "SPClientSecret" -AsPlainText)
+Update-MSGraphEnvironment -AppId $ServicePrincipalConnection.ApplicationId -AuthUrl $("https://login.microsoftonline.com", $ServicePrincipalConnection.TenantId -join "/") -Quiet
+Write-Output "Checking Graph environment variables"
+Write-Output $(Get-MSGraphMetadata)
+Connect-MSGraph -ClientSecret $SPClientSecret
+
+Write-Output "Granting client credentials token"
+$graphURLBase = "https://login.microsoftonline.com"
+$graphURLTenant = "$($ServicePrincipalConnection.tenantID)/oauth2/v2.0/token"
+$graphURLGrantType = "client_credentials"
+$graphURLScope = "devicemanagementapps.readwriteall"
+$graphRequest = Invoke-MSGraphRequest -HttpMethod POST -Url "$($graphURLBase)/$($graphURLTenant)?grant_type=$($graphURLGrantType)&client_id=$($ServicePrincipalConnection.ApplicationId)&client_secret=$($SPClientSecret)&scope=$($graphURLScope)"
+Write-Output -InputObject "Token request response: $($graphRequest | ConvertFrom-Json)"
 
 # Import the variables for building the package
+Write-Output "Importing variables for package"
 $appPropertiesFile = Join-Path -Path $PWD -ChildPath "$applicationName.ipa.ps1"
 $appProperties = . $appPropertiesFile
 
 # Check for existing applications with the same displayName (as it's the only indexable value provided)
+Write-Output "Checking for existing applications"
 $existingApp = Get-IntuneMobileApp -Filter "displayName eq `'$($appProperties.displayName)`'" -ErrorAction SilentlyContinue
 
 # If the application exists, update the application properties (whether necessary or not) 
@@ -358,7 +377,8 @@ if ($null -ne $existingApp) {
 }
 else {
     # Create the object that contains information about the app
-    New-MobileAppObject `
+    Write-Output "Creating object for new mobile app"
+    $obj = New-MobileAppObject `
         -iosLobApp `
         -applicableDeviceType (New-IosDeviceTypeObject -iPad $true -iPhoneAndIPod $true) `
         -minimumSupportedOperatingSystem (New-IosMinimumOperatingSystemObject -v12_0 $true) `
@@ -372,11 +392,13 @@ else {
         -expirationDateTime $appProperties.expirationDateTime
 }
 # Upload the app file with the app information
+Write-Output "Identifying application"
 $appToUpload = Get-IntuneMobileApp -Filter "displayName eq `'$($appProperties.displayName)`'"
 $filePath = Join-Path -Path $PWD -ChildPath $appProperties.sourceFile
+Write-Output "Publishing application"
 $createdApp = Set-LobApp -filePath $filePath -mobileApp $appToUpload
 
 # Write the output for the job
+Write-Output "Outputting job status"
 Write-Output $createdApp
-
 #endregion Intune Graph application creation or update
