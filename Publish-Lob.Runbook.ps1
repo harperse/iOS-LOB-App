@@ -322,8 +322,8 @@ Get-AzStorageBlobContent -Context $storageContext -Blob "$ApplicationName.ipa.ps
 Write-Output "Verifying download from Azure Storage"
 if ((Test-Path "$PWD\$applicationName.ipa") -and (Test-Path "$PWD\$applicationName.ipa.ps1")) {
     Write-Output "Files acquired"
-    Remove-AzStorageBlob -Context $storageContext -Blob "$ApplicationName.ipa" -Container $CloudBlobContainer
-    Remove-AzStorageBlob -Context $storageContext -Blob "$ApplicationName.ipa.ps1" -Container $CloudBlobContainer
+    #*#*#*Remove-AzStorageBlob -Context $storageContext -Blob "$ApplicationName.ipa" -Container $CloudBlobContainer
+    #*#*#*Remove-AzStorageBlob -Context $storageContext -Blob "$ApplicationName.ipa.ps1" -Container $CloudBlobContainer
 }
 else { "Unable to get files from Azure storage"; exit }
 #Disconnect-AzAccount
@@ -335,17 +335,24 @@ else { "Unable to get files from Azure storage"; exit }
 # The ClientSecret is an application level password specifically created for the service principal tied to the automation account
 Write-Output "Connecting to MSGraph"
 $SPClientSecret = $(Get-AzKeyVaultSecret -VaultName $keyVaultName -Name "SPClientSecret" -AsPlainText)
-Update-MSGraphEnvironment -AppId $ServicePrincipalConnection.ApplicationId -AuthUrl $("https://login.microsoftonline.com", $ServicePrincipalConnection.TenantId -join "/") -Quiet
-Write-Output "Checking Graph environment variables"
-Write-Output $(Get-MSGraphMetadata)
-Connect-MSGraph -ClientSecret $SPClientSecret
+#Update-MSGraphEnvironment -AppId $ServicePrincipalConnection.ApplicationId -AuthUrl $("https://login.microsoftonline.com", $ServicePrincipalConnection.TenantId -join "/") -Quiet -SchemaVersion 'beta'
+Update-MSGraphEnvironment -SchemaVersion 'beta' -GraphBaseUrl "https://graph.microsoft.com" -RedirectLink $($(Get-AzADServicePrincipal -ApplicationId $ServicePrincipalConnection.ApplicationId).ServicePrincipalNames[0]) -AppId $ServicePrincipalConnection.ApplicationId -AuthUrl $("https://login.microsoftonline.com", $ServicePrincipalConnection.TenantId -join "/")
+$token = Connect-MSGraph -ClientSecret $SPClientSecret -PassThru 
+
 
 Write-Output "Granting client credentials token"
 $graphURLBase = "https://login.microsoftonline.com"
 $graphURLTenant = "$($ServicePrincipalConnection.tenantID)/oauth2/v2.0/token"
-$graphURLGrantType = "client_credentials"
-$graphURLScope = "devicemanagementapps.readwriteall"
-$graphRequest = Invoke-MSGraphRequest -HttpMethod POST -Url "$($graphURLBase)/$($graphURLTenant)?grant_type=$($graphURLGrantType)&client_id=$($ServicePrincipalConnection.ApplicationId)&client_secret=$($SPClientSecret)&scope=$($graphURLScope)"
+$graphRequestBody = @{
+    grant_type = "urn:ietf:params:oauth:grant-type:jwt-bearer"
+    client_id = $ServicePrincipalConnection.ApplicationId
+    client_secret = $SPClientSecret
+    scope = "devicemanagementapps.readwriteall"
+    requested_token_use = "on_behalf_of"
+    assertion = $token
+}
+$graphRequestBodyJson = $graphRequestBody | ConvertTo-Json
+$graphRequest = Invoke-MSGraphRequest -HttpMethod POST -Url "$($graphURLBase)/$($graphURLTenant)" -Content $graphRequestBodyJson
 Write-Output -InputObject "Token request response: $($graphRequest | ConvertFrom-Json)"
 
 # Import the variables for building the package
@@ -378,7 +385,7 @@ if ($null -ne $existingApp) {
 else {
     # Create the object that contains information about the app
     Write-Output "Creating object for new mobile app"
-    $obj = New-MobileAppObject `
+    New-MobileAppObject `
         -iosLobApp `
         -applicableDeviceType (New-IosDeviceTypeObject -iPad $true -iPhoneAndIPod $true) `
         -minimumSupportedOperatingSystem (New-IosMinimumOperatingSystemObject -v12_0 $true) `
